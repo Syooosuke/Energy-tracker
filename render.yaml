@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: energy-tracker
+    runtime: docker
+    dockerfilePath: ./Dockerfile.prod
+    plan: free
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DEBUG
+        value: ""
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1

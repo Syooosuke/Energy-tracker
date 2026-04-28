@@ -1,0 +1,27 @@
+# ── バックエンドビルドコンテキスト用 .dockerignore ─────────────────
+# context はプロジェクトルートなので、不要なものを除外してイメージを軽量化する
+
+# 開発環境
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# フロントエンド（backend イメージには不要）
+dashboard/node_modules/
+dashboard/dist/
+
+# Git
+.git/
+.gitignore
+
+# 環境変数（イメージに焼き込まない。実行時に env_file で渡す）
+.env
+.env.local
+
+# ドキュメント・その他
+*.md
+.DS_Store

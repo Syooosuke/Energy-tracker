@@ -1,0 +1,34 @@
+# ── Stage 1: フロントエンドビルド ────────────────────────────────────
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /app/dashboard
+COPY dashboard/package*.json ./
+RUN npm ci
+COPY dashboard/ ./
+RUN npm run build
+
+# ── Stage 2: バックエンド + 静的ファイル ─────────────────────────────
+FROM python:3.13-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl fonts-noto-cjk fontconfig && \
+    fc-cache -fv && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/ ./backend/
+COPY models/   ./models/
+COPY src/      ./src/
+COPY --from=frontend-builder /app/dashboard/dist ./dashboard/dist
+
+RUN mkdir -p data/processed
+
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser
+
+EXPOSE 8000
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

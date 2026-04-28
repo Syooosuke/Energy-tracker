@@ -1,0 +1,26 @@
+services:
+
+  # ── バックエンド（FastAPI + uvicorn --reload）────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      ALLOWED_ORIGINS: "http://localhost:5173,http://192.168.3.17:5173"
+    ports:
+      - "8000:8000"                     # ローカル npm run dev からアクセスするために公開
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app/backend
+      - ./models:/app/models
+      - ./src:/app/src
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "--silent", "http://localhost:8000/api/foods"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

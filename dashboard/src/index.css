@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Global resets ─────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ─── テーマ変数 ──────────────────────────────────────── */
+:root {
+  --bg-primary:   #060912;
+  --bg-secondary: #0e0e1a;
+  --text-primary: rgba(255,255,255,0.9);
+  --text-muted:   rgba(255,255,255,0.4);
+  --border-subtle: rgba(255,255,255,0.07);
+  --glass-bg:     rgba(255,255,255,0.04);
+  --scrollbar-thumb: rgba(255,255,255,0.1);
+  --scrollbar-hover: rgba(255,255,255,0.18);
+  --select-bg:    #0e0e1a;
+  --select-color: #e2e8f0;
+  --leaflet-bg:   #0a0a14;
+  --leaflet-zoom-bg: rgba(255,255,255,0.06);
+  --leaflet-zoom-border: rgba(255,255,255,0.1);
+  --leaflet-zoom-color:  rgba(255,255,255,0.7);
+  --datetime-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-primary:   #dde6f0;
+  --bg-secondary: #ccd8ea;
+  --text-primary: rgba(5,15,40,0.92);
+  --text-muted:   rgba(5,15,40,0.55);
+  --border-subtle: rgba(10,25,55,0.10);
+  --glass-bg:     rgba(255,255,255,0.75);
+  --scrollbar-thumb: rgba(10,25,55,0.15);
+  --scrollbar-hover: rgba(10,25,55,0.28);
+  --select-bg:    #ffffff;
+  --select-color: #1a202c;
+  --leaflet-bg:   #dde5f0;
+  --leaflet-zoom-bg: rgba(255,255,255,0.90);
+  --leaflet-zoom-border: rgba(0,0,0,0.15);
+  --leaflet-zoom-color:  rgba(10,25,55,0.75);
+  --datetime-scheme: light;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.25s, color 0.25s;
+}
+
+/* ─── Scrollbar ─────────────────────────────────────── */
+::-webkit-scrollbar               { width: 6px; height: 6px; }
+::-webkit-scrollbar-track         { background: transparent; }
+::-webkit-scrollbar-thumb         { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover   { background: var(--scrollbar-hover); }
+
+/* ─── Selection highlight ───────────────────────────── */
+::selection { background: rgba(34,211,238,0.25); color: inherit; }
+
+/* ─── Leaflet theme integration ─────────────────────── */
+.leaflet-container { background: var(--leaflet-bg) !important; }
+.leaflet-control-zoom a {
+  background: var(--leaflet-zoom-bg) !important;
+  border-color: var(--leaflet-zoom-border) !important;
+  color: var(--leaflet-zoom-color) !important;
+}
+.leaflet-control-zoom a:hover {
+  background: var(--leaflet-zoom-bg) !important;
+  filter: brightness(0.95);
+}
+.leaflet-control-attribution {
+  background: rgba(0,0,0,0.12) !important;
+  color: rgba(10,25,55,0.5) !important;
+  font-size: 9px !important;
+}
+[data-theme="light"] .leaflet-control-attribution {
+  background: rgba(255,255,255,0.75) !important;
+  color: rgba(10,25,55,0.5) !important;
+}
+.leaflet-control-attribution a { color: rgba(255,255,255,0.45) !important; }
+[data-theme="light"] .leaflet-control-attribution a { color: rgba(10,25,55,0.55) !important; }
+
+/* ─── datetime-local ────────────────────────────────── */
+input[type="datetime-local"] {
+  color-scheme: var(--datetime-scheme);
+}
+
+/* ─── Select option ─────────────────────────────────── */
+select option { background: var(--select-bg); color: var(--select-color); }
+
+/* ═══════════════════════════════════════════════════════
+   ライトモード — Tailwind white 系クラスを一括上書き
+   （App.jsx は text-white/x を多用しているため CSS で対処）
+   ═══════════════════════════════════════════════════════ */
+
+/* ── text-white とその不透明度バリアント ── */
+[data-theme="light"] .text-white                { color: rgba(5,15,40,0.95) !important; }
+[data-theme="light"] .text-white\/90            { color: rgba(5,15,40,0.92) !important; }
+[data-theme="light"] .text-white\/80            { color: rgba(5,15,40,0.86) !important; }
+[data-theme="light"] .text-white\/70            { color: rgba(5,15,40,0.75) !important; }
+[data-theme="light"] .text-white\/60            { color: rgba(5,15,40,0.65) !important; }
+[data-theme="light"] .text-white\/55            { color: rgba(5,15,40,0.60) !important; }
+[data-theme="light"] .text-white\/50            { color: rgba(5,15,40,0.56) !important; }
+[data-theme="light"] .text-white\/40            { color: rgba(5,15,40,0.50) !important; }
+[data-theme="light"] .text-white\/35            { color: rgba(5,15,40,0.46) !important; }
+[data-theme="light"] .text-white\/30            { color: rgba(5,15,40,0.42) !important; }
+[data-theme="light"] .text-white\/25            { color: rgba(5,15,40,0.36) !important; }
+[data-theme="light"] .text-white\/20            { color: rgba(5,15,40,0.30) !important; }
+[data-theme="light"] .text-white\/10            { color: rgba(5,15,40,0.20) !important; }
+
+/* ── bg-white/* → 半透明白パネル（白背景上でカード感を出す）── */
+[data-theme="light"] [class*="bg-white\/"] {
+  background-color: rgba(255,255,255,0.72) !important;
+}
+
+/* ── border-white/* → 薄いネイビー境界線 ── */
+[data-theme="light"] [class*="border-white\/"] {
+  border-color: rgba(10,25,55,0.12) !important;
+}
+
+/* ── backdrop-blur のグラスモーフィズム補強 ── */
+[data-theme="light"] .backdrop-blur-xl {
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* ── 環境 Blob（ライトモードでは少し薄く）── */
+[data-theme="light"] .blur-\[100px\],
+[data-theme="light"] .blur-\[80px\],
+[data-theme="light"] .blur-\[90px\] {
+  opacity: 0.45;
+}

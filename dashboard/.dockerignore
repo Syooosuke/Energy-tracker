@@ -1,0 +1,8 @@
+# ── フロントエンドビルドコンテキスト用 .dockerignore ───────────────
+
+node_modules/
+dist/
+.env
+.env.local
+*.md
+.DS_Store

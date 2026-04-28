@@ -1,22 +1,52 @@
-### AL ###
-#Template for AL projects for Dynamics 365 Business Central
-#launch.json folder
+# ── 環境変数（APIキー） ──
+.env
+.env.local
+.env.*.local
+
+# ── 秘密鍵・証明書 ──
+*.pem
+*.key
+*.p12
+
+# ── データベース ──
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# ── Node / フロントエンド ──
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# ── データ・モデル ──
+data/raw/
+data/processed/
+data/
+*.csv
+*.gpx
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── IDE ──
 .vscode/
-#Cache folder
-.alcache/
-#Symbols folder
-.alpackages/
-#Snapshots folder
-.snapshots/
-#Testing Output folder
-.output/
-#Extension App-file
-*.app
-#Rapid Application Development File
-rad.json
-#Translation Base-file
-*.g.xlf
-#License-file
-*.flf
-#Test results file
-TestResults.xml
+.idea/
+*.swp
+
+# ── その他 ──
+=0.1.9

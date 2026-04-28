@@ -1,0 +1,50 @@
+# エネルギー残量予測ツール requirements.txt
+# インストール: pip install -r requirements.txt
+
+# データ処理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 数値計算・最適化
+scipy>=1.10.0
+
+# 機械学習
+scikit-learn>=1.2.0
+
+# GPX読み込み
+gpxpy>=1.5.0
+
+# 可視化
+plotly>=5.15.0
+matplotlib>=3.7.0
+folium>=0.14.0
+
+# Web UI
+streamlit>=1.25.0
+
+# FastAPI backend
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# 環境変数管理
+python-dotenv>=1.0.0
+
+# XML安全解析（XXE攻撃対策）
+defusedxml>=0.7.1
+
+# レート制限（APIエンドポイントへの過剰リクエスト対策）
+slowapi>=0.1.9
+
+# 認証・アカウント管理
+sqlalchemy>=2.0.0
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+email-validator>=2.0.0
+
+# Garmin FIT ファイル解析
+fitparse>=1.2.0
+
+# HTTP クライアント（AI自然言語クエリ機能含む）
+requests>=2.31.0
+httpx>=0.27.0

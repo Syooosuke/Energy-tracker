@@ -1,0 +1,45 @@
+# 本番環境用
+# 使用: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+
+  backend:
+    environment:
+      ALLOWED_ORIGINS: "http://localhost"
+    ports: []                           # 本番ではバックエンドポートを外部に公開しない
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile            # 本番: Nginx + ビルド済み静的ファイル
+    ports:
+      - "127.0.0.1:8080:80"
+    networks:
+      - internal
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  internal:
+    driver: bridge
