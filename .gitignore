@@ -22,14 +22,12 @@ __pycache__/
 venv/
 .venv/
 *.egg-info/
-dist/
 build/
 .pytest_cache/
 .mypy_cache/
 
 # ── Node / フロントエンド ──
 dashboard/node_modules/
-dashboard/dist/
 dashboard/.vite/
 
 # ── データ・モデル ──
