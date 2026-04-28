@@ -108,8 +108,22 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # HTTPS 強制（本番のみ）
         if _IS_PROD:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        # CSP: API サーバーはHTMLを返さないため厳格に設定
-        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        # CSP: フロントエンド配信も兼ねるため適切なソースを許可
+        if request.url.path.startswith(("/api/", "/auth/")):
+            # API エンドポイントは引き続き厳格に
+            response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        else:
+            # フロントエンド用: JS/CSS/フォント/API接続を許可
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "img-src 'self' data: https: blob:; "
+                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de; "
+                "manifest-src 'self'; "
+                "frame-ancestors 'none'"
+            )
         # キャッシュ制御（認証情報を含むレスポンスはキャッシュしない）
         if request.url.path.startswith(("/auth/", "/api/")):
             response.headers["Cache-Control"] = "no-store"
