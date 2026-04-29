@@ -18,7 +18,12 @@ if _database_url:
     if _database_url.startswith("postgres://"):
         _database_url = _database_url.replace("postgres://", "postgresql://", 1)
     DB_URL = _database_url
-    engine = create_engine(DB_URL, echo=False)
+    engine = create_engine(
+        DB_URL,
+        echo=False,
+        pool_pre_ping=True,   # アイドル後の接続断（Supabase 5分タイムアウト等）でクラッシュしない
+        pool_recycle=300,     # 5分ごとに接続を更新
+    )
     DB_PATH = None
     _DB_DIR = None
 else:

@@ -170,8 +170,10 @@ def _resolve_providers(mode: str) -> list[tuple[str, callable]]:
             candidates.append(all_providers["gemini"])
         if os.environ.get("GROQ_API_KEY"):
             candidates.append(all_providers["groq"])
-        # Ollama は常に候補に（起動していなければ失敗して次へ）
-        candidates.append(all_providers["ollama"])
+        # Ollama は OLLAMA_BASE_URL が明示設定されているときのみ試行
+        # （未設定時は localhost への無駄な接続試行を避ける）
+        if os.environ.get("OLLAMA_BASE_URL"):
+            candidates.append(all_providers["ollama"])
         return candidates
 
     if mode in all_providers:

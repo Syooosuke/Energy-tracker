@@ -127,9 +127,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "worker-src blob:; "
                 "frame-ancestors 'none'"
             )
-        # キャッシュ制御（認証情報を含むレスポンスはキャッシュしない）
+        # キャッシュ制御
         if request.url.path.startswith(("/auth/", "/api/")):
+            # 認証情報を含むレスポンスはキャッシュしない
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path.startswith("/assets/"):
+            # Vite がコンテンツハッシュ付きファイル名を生成するため長期キャッシュ可能
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
 app.add_middleware(SecurityHeadersMiddleware)
@@ -162,6 +166,12 @@ def _clear_login_failure(ip: str):
 
 # 起動時刻（再起動検知用）
 _BOOT_TIME = _dt.datetime.now(tz=_dt.timezone.utc).isoformat()
+
+# ── ヘルスチェック ────────────────────────────────────────────────────
+@app.get("/health", include_in_schema=False)
+def health_check():
+    """Render のヘルスチェック用エンドポイント。"""
+    return {"status": "ok", "boot": _BOOT_TIME}
 
 @app.on_event("startup")
 def on_startup():
@@ -3996,9 +4006,18 @@ import httpx as _httpx
 import re as _re
 
 # ── インメモリキャッシュ（週次コーチング / POI）──────────
-_weekly_coaching_cache: dict = {}   # {f"{uid}_{year_w}": str}
+_weekly_coaching_cache: dict = {}   # {f"{uid}_{year_w}": result}
 _poi_cache: dict             = {}   # {cache_key: (timestamp, list)}
-_POI_CACHE_TTL = 3600              # 1時間
+_POI_CACHE_TTL    = 3600            # 1時間
+_CACHE_MAX_WEEKLY = 500             # ユーザー×週のエントリ上限
+_CACHE_MAX_POI    = 200             # POIエントリ上限
+
+def _trim_cache(cache: dict, max_size: int) -> None:
+    """キャッシュが上限を超えたら古いエントリを削除する（O(n) だが稀にしか発生しない）。"""
+    if len(cache) > max_size:
+        excess = len(cache) - max_size
+        for key in list(cache.keys())[:excess]:
+            cache.pop(key, None)
 
 # ══════════════════════════════════════════════════════════════════════
 # 機能1: 怪我リスク予測
@@ -4403,6 +4422,7 @@ async def get_route_poi(request: Request, body: POIRequest):
                 ),
             })
         _poi_cache[cache_key] = (now, pois)
+        _trim_cache(_poi_cache, _CACHE_MAX_POI)
     except Exception as e:
         logger.warning("Overpass API error: %s", e)
 
@@ -4657,6 +4677,7 @@ def get_weekly_coaching(
         "metrics":     {"ctl": ctl, "tsb": tsb, "hrv": hrv},
     }
     _weekly_coaching_cache[cache_key] = result
+    _trim_cache(_weekly_coaching_cache, _CACHE_MAX_WEEKLY)
     return result
 
 # ── フロントエンド静的ファイル配信（本番用）────────────────────────────

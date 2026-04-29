@@ -5,6 +5,7 @@ services:
     dockerfilePath: ./Dockerfile.prod
     plan: free
     autoDeploy: true
+    healthCheckPath: /health
     envVars:
       - key: JWT_SECRET
         generateValue: true
