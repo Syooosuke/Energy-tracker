@@ -29,6 +29,7 @@ build/
 # ── Node / フロントエンド ──
 dashboard/node_modules/
 dashboard/.vite/
+dashboard/dist/
 
 # ── データ・モデル ──
 data/raw/

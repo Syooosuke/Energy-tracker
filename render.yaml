@@ -4,6 +4,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile.prod
     plan: free
+    autoDeploy: true
     envVars:
       - key: JWT_SECRET
         generateValue: true
