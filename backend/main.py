@@ -1304,6 +1304,17 @@ def api_simulate(
             fatigue_info    = {**fatigue_model.info, "enabled": True},
             pace_model_type = pace_model_type,
         )
+        # supply_plan: 食品名付きの補給計画（supply-timing アラート用）
+        # req.supplies を時刻順にソートして supply_plan として保持する
+        out["supply_plan"] = sorted([
+            {
+                "time_min": se.time_min,
+                "food":     se.food,
+                "kcal":     float(FOOD_MASTER.get(se.food, {"kcal_per": 100})["kcal_per"] * se.qty),
+                "ka":       FOOD_MASTER.get(se.food, {"ka": 1.0})["ka"],
+            }
+            for se in req.supplies
+        ], key=lambda x: x["time_min"])
         if weather_obj:
             out["weather"] = {
                 "location":       weather_obj.location,

@@ -2834,7 +2834,9 @@ function TrainingPlanPanel() {
     try {
       const r = await getTrainingPlan(id);
       setPlan(r); setActiveWeek(0);
-    } catch(e) {}
+    } catch(e) {
+      setError(apiErr(e, "プランの読み込みに失敗しました"));
+    }
   };
 
   const handleDelete = async (id) => {
@@ -2842,7 +2844,9 @@ function TrainingPlanPanel() {
       await deleteTrainingPlan(id);
       setSavedPlans(p => p.filter(x => x.id !== id));
       if (plan?.plan_id === id) setPlan(null);
-    } catch(e) {}
+    } catch(e) {
+      setError(apiErr(e, "プランの削除に失敗しました"));
+    }
   };
 
   const PHASE_COLORS = {
