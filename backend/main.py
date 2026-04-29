@@ -473,7 +473,8 @@ def _make_synthetic_df():
         "timestamp":    pd.date_range("2024-01-01", periods=n, freq="10s"),
         "slope_pct":    slopes,
         "speed_ms":     speeds,
-        "speed_smooth": speeds,  # pace_predictor.py が要求するカラム
+        "speed_smooth": speeds,
+        "hr_smooth":    hrs,   # pace_predictor.py が要求するカラム
         "heart_rate":   hrs,
     })
 
