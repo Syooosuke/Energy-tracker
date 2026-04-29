@@ -7,6 +7,7 @@ numpy>=1.24.0
 # 可視化・PDF生成（models/report_generator_periodic.py で使用）
 matplotlib>=3.7.0
 reportlab>=4.0.0
+japanize-matplotlib>=1.1.3
 
 # 数値計算・最適化
 scipy>=1.10.0
