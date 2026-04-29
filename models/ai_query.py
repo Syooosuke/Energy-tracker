@@ -138,9 +138,10 @@ class AIQueryEngine:
 def _resolve_providers(mode: str) -> list[tuple[str, callable]]:
     """使用するプロバイダーのリストを返す。"""
     all_providers = {
-        "gemini": ("Gemini", _call_gemini),
-        "groq":   ("Groq",   _call_groq),
-        "ollama": ("Ollama", _call_ollama),
+        "anthropic": ("Claude",  _call_anthropic),
+        "gemini":    ("Gemini",  _call_gemini),
+        "groq":      ("Groq",    _call_groq),
+        "ollama":    ("Ollama",  _call_ollama),
     }
 
     if mode == "none":
@@ -148,6 +149,8 @@ def _resolve_providers(mode: str) -> list[tuple[str, callable]]:
 
     if mode == "auto":
         candidates = []
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            candidates.append(all_providers["anthropic"])
         if os.environ.get("GEMINI_API_KEY"):
             candidates.append(all_providers["gemini"])
         if os.environ.get("GROQ_API_KEY"):
@@ -165,6 +168,31 @@ def _resolve_providers(mode: str) -> list[tuple[str, callable]]:
 # ══════════════════════════════════════════════════════
 # 各プロバイダーの呼び出し実装
 # ══════════════════════════════════════════════════════
+
+def _call_anthropic(prompt: str) -> str:
+    """Anthropic Claude API (claude-haiku) — ANTHROPIC_API_KEY が必要"""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not set")
+
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    url = "https://api.anthropic.com/v1/messages"
+    payload = {
+        "model": model,
+        "max_tokens": 1024,
+        "system": _SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    resp = _requests.post(url, json=payload, headers=headers, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["content"][0]["text"]
+
 
 def _call_gemini(prompt: str) -> str:
     """Google Gemini API (gemini-1.5-flash-8b) — 無料枠: 1,500 req/日"""
@@ -349,8 +377,8 @@ def _fallback_answer(question: str, context: QueryContext) -> QueryResult:
         parts.append("データが不足しています。アクティビティをアップロードしてください。")
 
     parts.append(
-        "\n※ AI回答を有効にするには GEMINI_API_KEY または GROQ_API_KEY を設定してください。"
-        "\n  ローカル推論を使う場合は Ollama をインストールして `ollama run llama3.2` を実行してください。"
+        "\n※ AI回答を有効にするには ANTHROPIC_API_KEY（Claude）または"
+        " GEMINI_API_KEY / GROQ_API_KEY を Render の環境変数に設定してください。"
     )
 
     return QueryResult(

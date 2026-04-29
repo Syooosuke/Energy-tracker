@@ -66,29 +66,38 @@ def _setup_jp_font():
     import os
     import matplotlib.font_manager as fm
 
+    rcParams["axes.unicode_minus"] = False  # マイナス記号の文字化け防止
+
     # Docker/Linux 環境のフォントファイルを直接指定（優先）
     noto_paths = [
-        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
     ]
     for path in noto_paths:
         if os.path.exists(path):
             fm.fontManager.addfont(path)
             prop = fm.FontProperties(fname=path)
-            rcParams["font.family"] = prop.get_name()
+            name = prop.get_name()
+            # font.sans-serif リストの先頭に追加（直接代入より確実）
+            current = list(rcParams.get("font.sans-serif", []))
+            rcParams["font.sans-serif"] = [name] + [f for f in current if f != name]
+            rcParams["font.family"] = "sans-serif"
             return
 
     # フォント名で検索（macOS / 手動インストール環境）
     candidates = [
-        "Noto Sans CJK JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
-        "AppleGothic", "IPAexGothic",
+        "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+        "Noto Sans CJK JP", "AppleGothic", "IPAexGothic",
     ]
     available = {f.name for f in fm.fontManager.ttflist}
     for font in candidates:
         if font in available:
-            rcParams["font.family"] = font
+            current = list(rcParams.get("font.sans-serif", []))
+            rcParams["font.sans-serif"] = [font] + [f for f in current if f != font]
+            rcParams["font.family"] = "sans-serif"
             return
     rcParams["font.family"] = "sans-serif"
 
