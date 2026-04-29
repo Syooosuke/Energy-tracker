@@ -772,7 +772,7 @@ def _calc_difficulty_score(coords: list, elevations: list) -> dict:
 
 class RegisterRequest(BaseModel):
     email:        EmailStr = Field(..., description="メールアドレス")
-    password:     str      = Field(..., min_length=10, max_length=100)
+    password:     str      = Field(..., min_length=8, max_length=100)
     display_name: str      = Field("", max_length=50)
 
 class LoginRequest(BaseModel):
@@ -1287,11 +1287,9 @@ def api_simulate(
         # ── レスポンス構築 ───────────────────────────────────
         route["_weather"] = weather_obj
 
-        # 案3: ペースモデル種別を取得
+        # 案3: ペースモデル種別を取得（キャッシュ済みモデルから読む）
         try:
-            from pace_predictor import PaceRegressor as _PR
-            _tmp_reg = _PR(); _tmp_reg.fit(df)
-            pace_model_type = _tmp_reg.model_type
+            pace_model_type = _get_pace_regressor().model_type
         except Exception:
             pace_model_type = "gradient_boosting"
 
@@ -2684,7 +2682,7 @@ def get_supply_timing_alerts(request: Request, req: SupplyTimingRequest):
 
     # 現在のエネルギー残量推定（線形補間）
     time_arr = sim.get("time_min", [])
-    e_arr    = sim.get("E_kcal", [])
+    e_arr    = sim.get("e_kcal", [])
     current_e = None
     if time_arr and e_arr and len(time_arr) == len(e_arr):
         t = req.current_elapsed_min
@@ -3912,7 +3910,7 @@ def adjust_training_plan(
     for w in workouts:
         w2 = dict(w)
         msg_lower = body.message.lower()
-        if any(kw in body.message for kw in ["疲れ", "疲労", "きつい", "しんどい", "休み"]):
+        if any(kw in msg_lower for kw in ["疲れ", "疲労", "きつい", "しんどい", "休み", "tired", "rest", "fatigue"]):
             if w2.get("workout_type") in ("TEMPO", "INTERVAL"):
                 w2["workout_type"] = "EASY"
                 w2["description"]  = "疲労を考慮してイージーペースに変更しました。" + w2.get("description", "")
@@ -4398,7 +4396,7 @@ async def get_route_poi(request: Request, body: POIRequest):
 
     bbox = f"{body.south},{body.west},{body.north},{body.east}"
     union = "".join(_CAT_MAP[c] for c in valid_cats)
-    query = f"[out:json][timeout:15];({union});out center 100;"
+    query = f"[out:json][timeout:15][bbox:{bbox}];({union});out center 100;"
 
     pois = []
     try:

@@ -2096,7 +2096,7 @@ function ConditioningTab() {
             icon={Smartphone}
             onFile={handleAhUpload}
             loading={ahLoading}
-            result={ahResult ? (ahResult.status === "processing" ? ahResult.message : `${ahResult.n_workouts}件のワークアウト / ${ahResult.n_daily_metrics}日分のデータを取り込みました`) : null}
+            result={ahResult ? ahResult.message : null}
             error={ahError}
           />
         </div>
