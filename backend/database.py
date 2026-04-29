@@ -1,31 +1,37 @@
 """
-database.py — SQLAlchemy + SQLite セットアップ
-================================================
-データは /app/data/energy_tracker.db に保存される。
-docker-compose の volumes: - ./data:/app/data により
-コンテナ再起動後もデータは永続化される。
+database.py — SQLAlchemy DB セットアップ
+=========================================
+- DATABASE_URL 環境変数が設定されていれば PostgreSQL（Supabase等）を使用
+- なければローカルの SQLite にフォールバック
 """
 
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-# データベースファイルのパス
-# 環境変数 DB_PATH が設定されていればそれを使う（Renderの永続ディスク用）
-# なければデフォルトの data/ ディレクトリ
-if os.environ.get("DB_PATH"):
-    DB_PATH = os.environ["DB_PATH"]
-    _DB_DIR = os.path.dirname(DB_PATH)
+# DATABASE_URL が設定されていれば PostgreSQL、なければ SQLite
+_database_url = os.environ.get("DATABASE_URL")
+
+if _database_url:
+    # Supabase等のPostgreSQL接続
+    # postgres:// → postgresql:// に正規化（SQLAlchemy 2.x対応）
+    if _database_url.startswith("postgres://"):
+        _database_url = _database_url.replace("postgres://", "postgresql://", 1)
+    DB_URL = _database_url
+    engine = create_engine(DB_URL, echo=False)
+    DB_PATH = None
+    _DB_DIR = None
 else:
+    # ローカル開発用 SQLite
     _DB_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
     DB_PATH = os.path.join(_DB_DIR, "energy_tracker.db")
-DB_URL   = f"sqlite:///{DB_PATH}"
+    DB_URL  = f"sqlite:///{DB_PATH}"
+    engine  = create_engine(
+        DB_URL,
+        connect_args={"check_same_thread": False},
+        echo=False,
+    )
 
-engine = create_engine(
-    DB_URL,
-    connect_args={"check_same_thread": False},  # SQLite + FastAPI スレッド対応
-    echo=False,
-)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -44,13 +50,13 @@ def get_db():
 
 def init_db() -> None:
     """起動時にテーブルを作成する（存在しない場合のみ）。"""
-    os.makedirs(_DB_DIR, exist_ok=True)
-    # models_db をインポートしてテーブル定義を登録してからcreate_all
+    if _DB_DIR:
+        os.makedirs(_DB_DIR, exist_ok=True)
     from backend import models_db  # noqa: F401
     Base.metadata.create_all(bind=engine)
-    # DBファイルのパーミッションをオーナーのみ読み書き可能に制限（600）
-    try:
-        if os.path.exists(DB_PATH):
+    # SQLite のみ: パーミッション制限
+    if DB_PATH and os.path.exists(DB_PATH):
+        try:
             os.chmod(DB_PATH, 0o600)
-    except OSError:
-        pass  # コンテナ環境等でパーミッション変更できない場合は無視
+        except OSError:
+            pass
