@@ -4439,8 +4439,10 @@ class RaceStrategyRequest(BaseModel):
     race_distance_km: float = Field(..., ge=0.1, le=500)
     elevation_gain_m: float = Field(0.0, ge=0)
     target_time_min:  float = Field(..., ge=5, le=10080)
-    race_date:        str   = Field(..., max_length=10)
+    race_date:        str   = Field("", max_length=10)
     course_notes:     str   = Field("", max_length=300)
+    race_name:        str   = Field("", max_length=100)
+    activity_type:    str   = Field("running", max_length=30)
 
 @app.post("/api/ai/race-strategy")
 @limiter.limit("5/minute")

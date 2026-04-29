@@ -2533,7 +2533,7 @@ function AIQueryPanel() {
               {result.confidence === "high" ? "高信頼度" : "中信頼度"}
             </span>
             {!result.has_ai && (
-              <span className="text-[10px] text-white/30 bg-white/5 border border-white/10 rounded-md px-1.5 py-0.5">統計モード（ANTHROPIC_API_KEY未設定）</span>
+              <span className="text-[10px] text-white/30 bg-white/5 border border-white/10 rounded-md px-1.5 py-0.5">統計モード（AIキー未設定）</span>
             )}
           </div>
           {result.follow_up_suggestions?.length > 0 && (
@@ -3173,7 +3173,7 @@ function WeatherPerformancePanel() {
    NEW: GoalTimeProbPanel — 目標タイム達成確率
 ───────────────────────────────────────────────────── */
 function GoalTimeProbPanel() {
-  const [form, setForm] = useState({ activity_type: "running", distance_km: 42.195, target_time_min: 240, elevation_gain_m: 0 });
+  const [form, setForm] = useState({ activity_type: "running", race_distance_km: 42.195, target_time_min: 240, elevation_gain_m: 0 });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -3211,7 +3211,7 @@ function GoalTimeProbPanel() {
         </div>
         <div>
           <label className="text-white/40 block mb-1">距離 (km)</label>
-          <input type="number" value={form.distance_km} onChange={e => setForm(f => ({ ...f, distance_km: Number(e.target.value) }))}
+          <input type="number" value={form.race_distance_km} onChange={e => setForm(f => ({ ...f, race_distance_km: Number(e.target.value) }))}
             className={`${glass} w-full px-3 py-2 rounded-xl text-white/80 outline-none`} />
         </div>
         <div>
@@ -3246,9 +3246,9 @@ function GoalTimeProbPanel() {
             </div>
             <div className="text-xs text-white/50 mt-1">目標達成確率</div>
           </div>
-          {result.predicted_time_min && (
+          {result.estimated_time_min && (
             <div className="text-center text-xs text-white/50">
-              予測タイム: <span className="text-white/80 font-mono">{Math.floor(result.predicted_time_min / 60)}h{Math.round(result.predicted_time_min % 60)}m</span>
+              予測タイム: <span className="text-white/80 font-mono">{Math.floor(result.estimated_time_min / 60)}h{Math.round(result.estimated_time_min % 60)}m</span>
             </div>
           )}
           {result.advice && <p className="text-xs text-white/60">{result.advice}</p>}
@@ -3272,10 +3272,11 @@ function GoalTimeProbPanel() {
 function RaceStrategyPanel() {
   const [form, setForm] = useState({
     race_name: "",
-    distance_km: 42.195,
+    race_distance_km: 42.195,
     elevation_gain_m: 0,
     target_time_min: 240,
     activity_type: "running",
+    race_date: new Date().toISOString().slice(0, 10),
   });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -3318,7 +3319,7 @@ function RaceStrategyPanel() {
         </div>
         <div>
           <label className="text-white/40 block mb-1">距離 (km)</label>
-          <input type="number" value={form.distance_km} onChange={e => setForm(f => ({ ...f, distance_km: Number(e.target.value) }))}
+          <input type="number" value={form.race_distance_km} onChange={e => setForm(f => ({ ...f, race_distance_km: Number(e.target.value) }))}
             className={`${glass} w-full px-3 py-2 rounded-xl text-white/80 outline-none`} />
         </div>
         <div>
@@ -3329,6 +3330,11 @@ function RaceStrategyPanel() {
         <div>
           <label className="text-white/40 block mb-1">目標タイム (分)</label>
           <input type="number" value={form.target_time_min} onChange={e => setForm(f => ({ ...f, target_time_min: Number(e.target.value) }))}
+            className={`${glass} w-full px-3 py-2 rounded-xl text-white/80 outline-none`} />
+        </div>
+        <div>
+          <label className="text-white/40 block mb-1">レース日</label>
+          <input type="date" value={form.race_date} onChange={e => setForm(f => ({ ...f, race_date: e.target.value }))}
             className={`${glass} w-full px-3 py-2 rounded-xl text-white/80 outline-none`} />
         </div>
       </div>
@@ -3345,7 +3351,7 @@ function RaceStrategyPanel() {
         <div className="space-y-3">
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 space-y-2">
             <p className="text-xs font-semibold text-amber-300">{result.race_name || form.race_name} 戦略レポート</p>
-            <p className="text-xs text-white/70 leading-relaxed whitespace-pre-wrap">{result.strategy}</p>
+            <p className="text-xs text-white/70 leading-relaxed whitespace-pre-wrap">{result.strategy_text}</p>
           </div>
           {result.pace_plan && result.pace_plan.length > 0 && (
             <div className="space-y-1.5">
