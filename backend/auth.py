@@ -73,7 +73,12 @@ def create_token(user_id: int, email: str) -> str:
 
 def _decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": True, "require": ["exp", "sub"]},
+        )
     except JWTError:
         raise HTTPException(status_code=401, detail="認証トークンが無効または期限切れです")
 

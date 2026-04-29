@@ -10,6 +10,8 @@ services:
         generateValue: true
       - key: DEBUG
         value: ""
+      - key: ALLOWED_ORIGINS
+        value: "https://energy-tracker.onrender.com"
     disk:
       name: data
       mountPath: /app/data

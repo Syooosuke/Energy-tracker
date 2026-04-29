@@ -115,9 +115,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
         else:
             # フロントエンド用: JS/CSS/フォント/API接続を許可
+            # 'unsafe-inline' を script-src から除外（sw-register.js を外部ファイル化済み）
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline'; "
+                "script-src 'self'; "
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
                 "font-src 'self' https://fonts.gstatic.com; "
                 "img-src 'self' data: blob:; "
@@ -852,12 +853,19 @@ def get_foods():
 def get_activities():
     return list(ACTIVITY_PROFILES.keys())
 
-# ── 個人HRログのパス ──────────────────────────────────────────────────
-_PERSONAL_HR_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "personal_hr_log.csv")
+# ── 個人HRログのパス（ユーザーごとに分離）──────────────────────────────
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+
+def _personal_hr_path(user_id: int) -> str:
+    return os.path.join(_DATA_DIR, f"personal_hr_log_{user_id}.csv")
 
 @app.post("/api/upload-hr")
 @limiter.limit("10/minute")
-async def upload_hr_log(request: Request, file: UploadFile = File(...)):
+async def upload_hr_log(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
     """
     個人の心拍数ログ（CSV）をアップロードする。
     アップロードされたデータは次回シミュレーション時に
@@ -918,10 +926,11 @@ async def upload_hr_log(request: Request, file: UploadFile = File(...)):
             detail=f"有効な心拍データが不足しています（{len(hr_valid)}件 < 必要最低{HRZoneEstimator.MIN_SAMPLES}件）",
         )
 
-    # 保存（既存があれば上書き）
-    os.makedirs(os.path.dirname(_PERSONAL_HR_PATH), exist_ok=True)
-    df.to_csv(_PERSONAL_HR_PATH, index=False)
-    logger.info("Personal HR log saved: %d rows, col=%r", len(df), hr_col)
+    # 保存（既存があれば上書き、ユーザーごとに分離）
+    hr_path = _personal_hr_path(current_user.id)
+    os.makedirs(os.path.dirname(hr_path), exist_ok=True)
+    df.to_csv(hr_path, index=False)
+    logger.info("Personal HR log saved: user=%d, %d rows, col=%r", current_user.id, len(df), hr_col)
 
     # K-means でゾーンを即時推定して結果を返す
     est = HRZoneEstimator()
@@ -929,23 +938,28 @@ async def upload_hr_log(request: Request, file: UploadFile = File(...)):
     return {
         "message":    "個人HRログを保存しました。次回シミュレーションから自動でゾーン境界に反映されます",
         "n_rows":     len(df),
-        "n_valid_hr": len(hr_valid),
+        "n_valid_hr": int(len(hr_valid)),
         "hr_col":     hr_col,
         "hr_zones":   est.zone_info,
     }
 
 @app.get("/api/hr-zones")
 @limiter.limit("20/minute")
-def get_hr_zones(request: Request, hr_max: float = 180.0):
+def get_hr_zones(
+    request: Request,
+    hr_max: float = 180.0,
+    current_user: User = Depends(get_current_user),
+):
     """
     現在の心拍ゾーン設定を返す。
     個人HRログがあればK-meansの結果、なければhr_maxベースの標準値。
     """
     import pandas as pd
     est = HRZoneEstimator()
-    if os.path.exists(_PERSONAL_HR_PATH):
+    hr_path = _personal_hr_path(current_user.id)
+    if os.path.exists(hr_path):
         try:
-            df     = pd.read_csv(_PERSONAL_HR_PATH)
+            df     = pd.read_csv(hr_path)
             hr_col = next((c for c in ["hr_smooth", "heart_rate", "hr_raw"] if c in df.columns), None)
             if hr_col:
                 est.fit(df[hr_col].dropna().values, hr_max=hr_max)
@@ -953,14 +967,18 @@ def get_hr_zones(request: Request, hr_max: float = 180.0):
             est._set_fallback(hr_max)
     else:
         est._set_fallback(hr_max)
-    return {"has_personal_data": os.path.exists(_PERSONAL_HR_PATH), **est.zone_info}
+    return {"has_personal_data": os.path.exists(hr_path), **est.zone_info}
 
 @app.delete("/api/hr-zones")
 @limiter.limit("10/minute")
-def delete_hr_log(request: Request):
+def delete_hr_log(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
     """個人HRログを削除し、標準閾値に戻す。"""
-    if os.path.exists(_PERSONAL_HR_PATH):
-        os.remove(_PERSONAL_HR_PATH)
+    hr_path = _personal_hr_path(current_user.id)
+    if os.path.exists(hr_path):
+        os.remove(hr_path)
         return {"message": "個人HRログを削除しました。標準閾値（hr_max基準）に戻ります"}
     return {"message": "個人HRログは存在しません"}
 
@@ -1136,7 +1154,11 @@ def api_weather(request: Request, req: WeatherRequest):
 
 @app.post("/api/simulate")
 @limiter.limit("10/minute")
-def api_simulate(request: Request, req: SimulateRequest):
+def api_simulate(
+    request: Request,
+    req: SimulateRequest,
+    current_user: User | None = Depends(get_current_user_optional),
+):
     import datetime as dt
 
     route   = req.route
@@ -1200,12 +1222,9 @@ def api_simulate(request: Request, req: SimulateRequest):
         # ── 案2: 心拍ゾーン自動推定 ──────────────────────────
         # 個人のHRログ（/api/upload-hr でアップロードされたもの）がある場合のみ
         # K-means で個人最適化する。なければ hr_max ベースの標準閾値を使う。
-        # merged_log.csv は架空の富士山データなので、個人データとして使わない。
         hr_zone_est = HRZoneEstimator()
-        personal_hr_path = os.path.join(
-            os.path.dirname(__file__), "..", "data", "personal_hr_log.csv"
-        )
-        if os.path.exists(personal_hr_path):
+        personal_hr_path = _personal_hr_path(current_user.id) if current_user else None
+        if personal_hr_path and os.path.exists(personal_hr_path):
             try:
                 import pandas as pd
                 hr_df  = pd.read_csv(personal_hr_path)
@@ -1566,6 +1585,14 @@ def _apple_health_background(
                 xml_name = next((n for n in zf.namelist() if n.endswith("export.xml")), None)
                 if not xml_name:
                     logger.error("Apple Health BG: ZIP 内に export.xml なし (user=%d)", user_id)
+                    return
+                # ZIP ボム対策: 展開後サイズが 500 MB を超える場合は拒否
+                _MAX_XML_BYTES = 500 * 1024 * 1024
+                if zf.getinfo(xml_name).file_size > _MAX_XML_BYTES:
+                    logger.error(
+                        "Apple Health BG: export.xml が大きすぎます (%d bytes, user=%d)",
+                        zf.getinfo(xml_name).file_size, user_id,
+                    )
                     return
                 xml_source = zf.open(xml_name)
             except _zipfile.BadZipFile:
@@ -3018,6 +3045,8 @@ def _gain_bucket(m: float) -> str:
     else:          return "3000m+"
 
 
+_VALID_ACTIVITY_TYPES = {"hiking", "running", "cycling", "trail_running", "walking", "swimming"}
+
 @app.get("/api/peers/compare")
 @limiter.limit("20/minute")
 def get_peer_comparison(
@@ -3033,6 +3062,9 @@ def get_peer_comparison(
     ユーザー数が5人未満の場合はプライバシー保護のため返さない。
     """
     import datetime as dt_mod
+
+    if activity_type not in _VALID_ACTIVITY_TYPES:
+        raise HTTPException(status_code=422, detail=f"無効なアクティビティタイプです: {activity_type!r}")
 
     dist_b = _distance_bucket(distance_km)
     gain_b = _gain_bucket(elevation_gain_m)
@@ -4635,9 +4667,12 @@ if os.path.isdir(_DIST_DIR):
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend(full_path: str):
         """API以外のすべてのパスをReactのindex.htmlにフォールバック。"""
-        file_path = os.path.join(_DIST_DIR, full_path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
+        # パストラバーサル対策: realpath で正規化し、dist ディレクトリ外へのアクセスを拒否
+        dist_real = os.path.realpath(_DIST_DIR)
+        file_path = os.path.realpath(os.path.join(_DIST_DIR, full_path))
+        if file_path.startswith(dist_real + os.sep) or file_path == dist_real:
+            if os.path.isfile(file_path):
+                return FileResponse(file_path)
         # index.html は必ずサーバーから最新版を取得させる（ブラウザキャッシュ防止）
         return FileResponse(
             os.path.join(_DIST_DIR, "index.html"),
