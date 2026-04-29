@@ -474,16 +474,29 @@ def _make_synthetic_df():
         "slope_pct":    slopes,
         "speed_ms":     speeds,
         "speed_smooth": speeds,
-        "hr_smooth":    hrs,   # pace_predictor.py が要求するカラム
+        "hr_smooth":    hrs,
         "heart_rate":   hrs,
     })
 
+# PaceRegressor はサーバー起動時に1回だけ学習してキャッシュする（リクエストごとの学習を回避）
+_cached_pace_regressor = None
+
+def _get_pace_regressor():
+    global _cached_pace_regressor
+    if _cached_pace_regressor is None:
+        from pace_predictor import PaceRegressor
+        df = _load_df()
+        reg = PaceRegressor()
+        reg.fit(df)
+        _cached_pace_regressor = reg
+        logger.info("PaceRegressor fitted and cached (model_type=%s)", reg.model_type)
+    return _cached_pace_regressor
+
 def _build_engine_a(df, slope_arr, profile: UserProfile):
-    from pace_predictor import PaceRegressor
     from ke_estimator   import energy_watt
     from pace_predictor import running_speed as _run_spd, tobler_speed as _tobler
 
-    reg = PaceRegressor(); reg.fit(df)
+    reg = _get_pace_regressor()
     act = profile.activity_type
     if act == "running":
         spd = np.clip([_run_spd(s, profile.base_run_speed_ms) for s in slope_arr], 1.0, 8.0)
@@ -1159,7 +1172,7 @@ def api_simulate(request: Request, req: SimulateRequest):
         # ── 案4: 完走確率予測（Monte Carlo, n=100） ──────────
         completion = None
         try:
-            predictor  = CompletionPredictor(n_sim=100)
+            predictor  = CompletionPredictor(n_sim=20)
             completion = predictor.predict(
                 engine_a_output = engine_a,
                 profile         = prof,

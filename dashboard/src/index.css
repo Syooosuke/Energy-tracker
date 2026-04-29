@@ -67,6 +67,17 @@ body {
 ::selection { background: rgba(34,211,238,0.25); color: inherit; }
 
 /* ─── Leaflet theme integration ─────────────────────── */
+/* Tailwind preflight が img に max-width:100% / height:auto を適用するため
+   Leaflet タイルが崩れる問題を修正 */
+.leaflet-tile-container img,
+.leaflet-tile {
+  max-width: none !important;
+  height: auto;
+}
+.leaflet-container img {
+  max-width: none;
+  box-shadow: none;
+}
 .leaflet-container { background: var(--leaflet-bg) !important; }
 .leaflet-control-zoom a {
   background: var(--leaflet-zoom-bg) !important;

@@ -636,8 +636,11 @@ function FitBounds({ coords }) {
 function MapUpdater() {
   const map = useMap();
   useEffect(() => {
-    const t = setTimeout(() => map.invalidateSize(), 100);
-    return () => clearTimeout(t);
+    // タイルが確実に描画されるよう複数タイミングでサイズ再計算
+    const t1 = setTimeout(() => map.invalidateSize(), 50);
+    const t2 = setTimeout(() => map.invalidateSize(), 300);
+    const t3 = setTimeout(() => map.invalidateSize(), 800);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [map]);
   return null;
 }
@@ -675,10 +678,8 @@ function RouteMap({ coords, hoverFraction, onHover }) {
       >
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          subdomains={["a", "b", "c"]}
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           maxZoom={19}
-          crossOrigin="anonymous"
         />
         <MapUpdater />
         <FitBounds coords={coords} />
