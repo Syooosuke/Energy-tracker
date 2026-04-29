@@ -119,8 +119,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "script-src 'self' 'unsafe-inline'; "
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
                 "font-src 'self' https://fonts.gstatic.com; "
-                "img-src 'self' data: https: blob:; "
-                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; "
+                "img-src 'self' data: blob:; "
+                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de; "
                 "manifest-src 'self'; "
                 "worker-src blob:; "
                 "frame-ancestors 'none'"
@@ -248,6 +248,69 @@ def _run_column_migrations():
                 pass  # 既にカラム/テーブルが存在する場合は無視
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── タイルプロキシ（クロスオリジン問題を回避するため同一オリジンで配信）──
+_tile_cache: dict[str, tuple[bytes, float]] = {}
+_tile_http_client: httpx.AsyncClient | None = None
+
+def _get_tile_http_client() -> httpx.AsyncClient:
+    global _tile_http_client
+    if _tile_http_client is None:
+        _tile_http_client = httpx.AsyncClient(
+            headers={"User-Agent": "EnergyTracker/1.0 (personal fitness app; https://github.com/Syooosuke/Energy-tracker)"},
+            timeout=10.0,
+            follow_redirects=True,
+        )
+    return _tile_http_client
+
+@app.get("/api/tiles/{z}/{x}/{y}.png", include_in_schema=False)
+async def proxy_map_tile(z: int, x: int, y: int):
+    """OSM タイルをプロキシ配信。同一オリジンにすることでCSP/CORS問題を回避。"""
+    import time
+    from fastapi.responses import Response as RawResponse
+
+    # ズームレベルと座標の妥当性チェック（任意URLへのプロキシ悪用を防ぐ）
+    if not (0 <= z <= 20):
+        raise HTTPException(status_code=400, detail="Invalid zoom level")
+    max_coord = 2 ** z
+    if not (0 <= x < max_coord and 0 <= y < max_coord):
+        raise HTTPException(status_code=400, detail="Invalid tile coordinates")
+
+    cache_key = f"{z}/{x}/{y}"
+    now = time.monotonic()
+
+    # キャッシュヒット（1時間有効）
+    if cache_key in _tile_cache:
+        data, expires = _tile_cache[cache_key]
+        if now < expires:
+            return RawResponse(content=data, media_type="image/png",
+                               headers={"Cache-Control": "public, max-age=3600"})
+
+    # OSM サブドメインを分散（a/b/c）
+    subdomain = ("a", "b", "c")[hash(cache_key) % 3]
+    url = f"https://{subdomain}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+
+    try:
+        client = _get_tile_http_client()
+        r = await client.get(url)
+        if r.status_code != 200:
+            raise HTTPException(status_code=404, detail="Tile not found")
+        data = r.content
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Tile proxy error %s: %s", url, e)
+        raise HTTPException(status_code=502, detail="Tile fetch failed")
+
+    # キャッシュサイズ上限（1000タイル）を超えたら古いものを削除
+    if len(_tile_cache) >= 1000:
+        oldest = sorted(_tile_cache, key=lambda k: _tile_cache[k][1])[:200]
+        for k in oldest:
+            del _tile_cache[k]
+
+    _tile_cache[cache_key] = (data, now + 3600)
+    return RawResponse(content=data, media_type="image/png",
+                       headers={"Cache-Control": "public, max-age=3600"})
 
 # ── CORS ──────────────────────────────────────────────
 # 許可オリジンは環境変数から読む。未設定時はローカル開発用にフォールバック。
