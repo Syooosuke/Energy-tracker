@@ -1975,6 +1975,15 @@ function ConditioningTab() {
   // ── Apple Health アップロード ────────────────────
   const handleAhUpload = async (file) => {
     setAhLoading(true); setAhResult(null); setAhError(null);
+    const MAX_MB = 50;
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setAhError(
+        `ファイルサイズが ${MAX_MB}MB を超えています（${(file.size / 1024 / 1024).toFixed(0)}MB）。` +
+        `export.zip のまま（解凍せず）アップロードするか、Apple Health アプリで期間を絞ってエクスポートしてください。`
+      );
+      setAhLoading(false);
+      return;
+    }
     try {
       const r = await uploadAppleHealth(file, hrMax, hrRest);
       setAhResult(r);

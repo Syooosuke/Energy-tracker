@@ -18,6 +18,10 @@ iPhone の「ヘルスケア」アプリからエクスポートした export.xm
   - 歩数・距離
 
 依存ライブラリ: defusedxml>=0.7.1 (既存 requirements.txt に記載)
+
+メモリ効率:
+  iterparse を使い要素を処理後すぐ解放するため、巨大な export.xml でも
+  DOM 全体をメモリに蓄積せず低メモリで動作する。
 """
 
 from __future__ import annotations
@@ -52,6 +56,10 @@ _SPO2_TYPE     = "HKQuantityTypeIdentifierOxygenSaturation"
 _VO2MAX_TYPE   = "HKQuantityTypeIdentifierVO2Max"
 _SLEEP_TYPE    = "HKCategoryTypeIdentifierSleepAnalysis"
 _STEPS_TYPE    = "HKQuantityTypeIdentifierStepCount"
+
+# 睡眠カテゴリ値
+_DEEP_VALUES = {"HKCategoryValueSleepAnalysisAsleepDeep", "4"}
+_REM_VALUES  = {"HKCategoryValueSleepAnalysisAsleepREM",  "5"}
 
 
 @dataclass
@@ -94,7 +102,7 @@ class AppleHealthData:
 
 def parse_apple_health(source) -> AppleHealthData:
     """
-    Apple Health export.xml を解析する。
+    Apple Health export.xml を解析する（iterparse によるストリーミング処理）。
 
     Parameters
     ----------
@@ -107,17 +115,41 @@ def parse_apple_health(source) -> AppleHealthData:
     AppleHealthData
         workouts, daily_metrics, hr_timeseries を含む構造体
     """
+    if isinstance(source, (bytes, bytearray)):
+        source = io.BytesIO(source)
+
+    workouts: list[WorkoutSummary] = []
+    hr_rows: list[dict] = []
+    resting_hr_by_day: dict[date, list[float]] = {}
+    hrv_by_day:        dict[date, list[float]] = {}
+    spo2_by_day:       dict[date, list[float]] = {}
+    vo2max_by_day:     dict[date, list[float]] = {}
+    steps_by_day:      dict[date, int] = {}
+    sleep_by_day:      dict[date, dict] = {}
+
     try:
-        if isinstance(source, (bytes, bytearray)):
-            source = io.BytesIO(source)
-        tree = ET.parse(source)
-        root = tree.getroot()
+        for _event, elem in ET.iterparse(source, events=("end",)):
+            tag = elem.tag
+            if tag == "Workout":
+                w = _process_workout_elem(elem)
+                if w is not None:
+                    workouts.append(w)
+                elem.clear()
+            elif tag == "Record":
+                _process_record_elem(
+                    elem, hr_rows,
+                    resting_hr_by_day, hrv_by_day, spo2_by_day,
+                    vo2max_by_day, steps_by_day, sleep_by_day,
+                )
+                elem.clear()
     except ET.ParseError as e:
         raise ValueError(f"Apple Health XMLの解析に失敗しました: {e}") from e
 
-    workouts      = _parse_workouts(root)
-    hr_ts         = _parse_hr_timeseries(root)
-    daily_metrics = _build_daily_metrics(root)
+    hr_ts         = _build_hr_df(hr_rows)
+    daily_metrics = _build_daily_metrics_from_buckets(
+        resting_hr_by_day, hrv_by_day, spo2_by_day,
+        vo2max_by_day, steps_by_day, sleep_by_day,
+    )
 
     return AppleHealthData(
         workouts=workouts,
@@ -126,115 +158,130 @@ def parse_apple_health(source) -> AppleHealthData:
     )
 
 
-# ── ワークアウト解析 ──────────────────────────────────
+# ── ワークアウト処理 ──────────────────────────────────
 
-def _parse_workouts(root) -> list[WorkoutSummary]:
-    workouts = []
-    for elem in root.iter("Workout"):
-        atype = elem.get("workoutActivityType", "")
-        internal = _WORKOUT_MAP.get(atype)
-        if internal is None:
-            continue  # 対象外種別はスキップ
+def _process_workout_elem(elem) -> Optional[WorkoutSummary]:
+    """Workout 要素1件を WorkoutSummary に変換する。対象外なら None。"""
+    atype    = elem.get("workoutActivityType", "")
+    internal = _WORKOUT_MAP.get(atype)
+    if internal is None:
+        return None
 
+    start = _parse_dt(elem.get("startDate"))
+    end   = _parse_dt(elem.get("endDate"))
+    dur   = float(elem.get("duration") or 0)
+    dur_unit = elem.get("durationUnit", "min")
+    if dur_unit == "min":
+        dur *= 60
+
+    w = WorkoutSummary(
+        activity_type = internal,
+        start_time    = start,
+        end_time      = end,
+        duration_sec  = dur,
+        distance_m    = _extract_qty(elem, "totalDistance", "m"),
+        calories_kcal = _extract_qty(elem, "totalEnergyBurned", "kcal"),
+        device_name   = elem.get("sourceName", ""),
+    )
+
+    for stat in elem.iter("WorkoutStatistics"):
+        stype = stat.get("type", "")
+        if stype == _HR_TYPE:
+            w.avg_hr = _safe_float(stat.get("average"))
+            w.max_hr = _safe_float(stat.get("maximum"))
+            w.min_hr = _safe_float(stat.get("minimum"))
+        elif "FlightsClimbed" in stype or "ElevationAscended" in stype:
+            w.elevation_gain_m = _safe_float(stat.get("sum"))
+
+    return w
+
+
+# ── Record 要素処理 ───────────────────────────────────
+
+def _process_record_elem(
+    elem,
+    hr_rows: list,
+    resting_hr_by_day: dict,
+    hrv_by_day: dict,
+    spo2_by_day: dict,
+    vo2max_by_day: dict,
+    steps_by_day: dict,
+    sleep_by_day: dict,
+) -> None:
+    """Record 要素1件を各集計バケットに振り分ける。"""
+    rtype = elem.get("type", "")
+    val   = _safe_float(elem.get("value"))
+
+    if rtype == _HR_TYPE:
+        ts = _parse_dt(elem.get("startDate"))
+        if ts and val and 40 <= val <= 230:
+            hr_rows.append({"timestamp": ts, "hr": val})
+        return
+
+    if rtype == _SLEEP_TYPE:
         start = _parse_dt(elem.get("startDate"))
         end   = _parse_dt(elem.get("endDate"))
-        dur   = float(elem.get("duration") or 0)
-        dur_unit = elem.get("durationUnit", "min")
-        if dur_unit == "min":
-            dur *= 60
+        if start and end:
+            dur_h = (end - start).total_seconds() / 3600
+            d     = start.date()
+            sv    = elem.get("value", "")
+            if d not in sleep_by_day:
+                sleep_by_day[d] = {"total": 0.0, "deep": 0.0, "rem": 0.0}
+            if "InBed" not in sv and sv != "0":
+                sleep_by_day[d]["total"] += dur_h
+            if sv in _DEEP_VALUES:
+                sleep_by_day[d]["deep"] += dur_h
+            if sv in _REM_VALUES:
+                sleep_by_day[d]["rem"] += dur_h
+        return
 
-        w = WorkoutSummary(
-            activity_type = internal,
-            start_time    = start,
-            end_time      = end,
-            duration_sec  = dur,
-            distance_m    = _extract_qty(elem, "totalDistance", "m"),
-            calories_kcal = _extract_qty(elem, "totalEnergyBurned", "kcal"),
-            device_name   = elem.get("sourceName", ""),
-        )
+    if val is None:
+        return
+    ts = _parse_dt(elem.get("startDate"))
+    if ts is None:
+        return
+    d = ts.date()
 
-        # WorkoutStatistics から HR 取得
-        for stat in elem.iter("WorkoutStatistics"):
-            stype = stat.get("type", "")
-            if stype == _HR_TYPE:
-                w.avg_hr = _safe_float(stat.get("average"))
-                w.max_hr = _safe_float(stat.get("maximum"))
-                w.min_hr = _safe_float(stat.get("minimum"))
-            elif "FlightsClimbed" in stype or "ElevationAscended" in stype:
-                w.elevation_gain_m = _safe_float(stat.get("sum"))
-
-        workouts.append(w)
-
-    return workouts
+    if rtype == _RESTING_HR and 30 <= val <= 120:
+        resting_hr_by_day.setdefault(d, []).append(val)
+    elif rtype == _HRV_TYPE and 0 < val <= 200:
+        hrv_by_day.setdefault(d, []).append(val)
+    elif rtype == _SPO2_TYPE:
+        v = val * 100 if val <= 1.0 else val
+        if 70 <= v <= 100:
+            spo2_by_day.setdefault(d, []).append(v)
+    elif rtype == _VO2MAX_TYPE and 10 < val < 90:
+        vo2max_by_day.setdefault(d, []).append(val)
+    elif rtype == _STEPS_TYPE:
+        steps_by_day[d] = steps_by_day.get(d, 0) + int(val)
 
 
-# ── 心拍時系列 ────────────────────────────────────────
+# ── DataFrame 構築 ────────────────────────────────────
 
-def _parse_hr_timeseries(root) -> pd.DataFrame:
-    rows = []
-    for rec in root.iter("Record"):
-        if rec.get("type") != _HR_TYPE:
-            continue
-        ts  = _parse_dt(rec.get("startDate"))
-        val = _safe_float(rec.get("value"))
-        if ts and val and 40 <= val <= 230:
-            rows.append({"timestamp": ts, "hr": val})
-
-    if not rows:
+def _build_hr_df(hr_rows: list) -> pd.DataFrame:
+    if not hr_rows:
         return pd.DataFrame(columns=["timestamp", "hr"])
-
-    df = pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
+    df = pd.DataFrame(hr_rows).sort_values("timestamp").reset_index(drop=True)
     return df
 
 
-# ── デイリーメトリクス構築 ───────────────────────────
-
-def _build_daily_metrics(root) -> list[DailyHealthMetrics]:
-    """Record 要素から日次集計を作成する。"""
-    buckets: dict[date, DailyHealthMetrics] = {}
-
-    def _get(d: date) -> DailyHealthMetrics:
-        if d not in buckets:
-            buckets[d] = DailyHealthMetrics(date=d)
-        return buckets[d]
-
-    resting_hr_by_day: dict[date, list[float]] = {}
-    hrv_by_day:        dict[date, list[float]] = {}
-    spo2_by_day:       dict[date, list[float]] = {}
-    vo2max_by_day:     dict[date, list[float]] = {}
-    steps_by_day:      dict[date, int] = {}
-
-    for rec in root.iter("Record"):
-        rtype = rec.get("type", "")
-        ts    = _parse_dt(rec.get("startDate"))
-        val   = _safe_float(rec.get("value"))
-        if ts is None or val is None:
-            continue
-        d = ts.date()
-
-        if rtype == _RESTING_HR and 30 <= val <= 120:
-            resting_hr_by_day.setdefault(d, []).append(val)
-        elif rtype == _HRV_TYPE and 0 < val <= 200:
-            hrv_by_day.setdefault(d, []).append(val)
-        elif rtype == _SPO2_TYPE:
-            v = val * 100 if val <= 1.0 else val  # 0.97 → 97%
-            if 70 <= v <= 100:
-                spo2_by_day.setdefault(d, []).append(v)
-        elif rtype == _VO2MAX_TYPE and 10 < val < 90:
-            vo2max_by_day.setdefault(d, []).append(val)
-        elif rtype == _STEPS_TYPE:
-            steps_by_day[d] = steps_by_day.get(d, 0) + int(val)
-
-    # 睡眠解析
-    sleep_by_day = _parse_sleep(root)
-
-    # 全日付を結合
+def _build_daily_metrics_from_buckets(
+    resting_hr_by_day: dict,
+    hrv_by_day: dict,
+    spo2_by_day: dict,
+    vo2max_by_day: dict,
+    steps_by_day: dict,
+    sleep_by_day: dict,
+) -> list[DailyHealthMetrics]:
+    """各バケットを結合して DailyHealthMetrics のリストを返す。"""
     all_dates = (
         set(resting_hr_by_day) | set(hrv_by_day) | set(spo2_by_day)
         | set(vo2max_by_day) | set(steps_by_day) | set(sleep_by_day)
     )
+    result: list[DailyHealthMetrics] = []
+
     for d in sorted(all_dates):
-        m = _get(d)
+        m = DailyHealthMetrics(date=d)
         if d in resting_hr_by_day:
             m.resting_hr = float(np.mean(resting_hr_by_day[d]))
         if d in hrv_by_day:
@@ -246,54 +293,17 @@ def _build_daily_metrics(root) -> list[DailyHealthMetrics]:
         if d in steps_by_day:
             m.steps = steps_by_day[d]
         if d in sleep_by_day:
-            m.sleep_hours, m.sleep_quality_score = sleep_by_day[d]
-
-    return list(buckets.values())
-
-
-def _parse_sleep(root) -> dict[date, tuple[float, float]]:
-    """睡眠ログから日次の睡眠時間と品質スコアを算出する。"""
-    # HKCategoryValueSleepAnalysis: 0=InBed, 1=Asleep, 2=Awake, 3=Core, 4=Deep, 5=REM
-    DEEP_VALUES = {"HKCategoryValueSleepAnalysisAsleepDeep", "4"}
-    REM_VALUES  = {"HKCategoryValueSleepAnalysisAsleepREM",  "5"}
-
-    by_date: dict[date, dict] = {}
-
-    for rec in root.iter("Record"):
-        if rec.get("type") != _SLEEP_TYPE:
-            continue
-        val   = rec.get("value", "")
-        start = _parse_dt(rec.get("startDate"))
-        end   = _parse_dt(rec.get("endDate"))
-        if not (start and end):
-            continue
-
-        dur_h = (end - start).total_seconds() / 3600
-        d = start.date()
-        if d not in by_date:
-            by_date[d] = {"total": 0.0, "deep": 0.0, "rem": 0.0}
-
-        # 睡眠中カテゴリのみカウント（InBed=0 は除外）
-        if "InBed" not in val and "0" != val:
-            by_date[d]["total"] += dur_h
-        if val in DEEP_VALUES:
-            by_date[d]["deep"] += dur_h
-        if val in REM_VALUES:
-            by_date[d]["rem"] += dur_h
-
-    result = {}
-    for d, v in by_date.items():
-        total = v["total"]
-        if total < 0.5:
-            continue
-        # 品質スコア: 理想8h, 深睡眠率15%以上, REM率20%以上 が満点
-        score_duration = min(total / 8.0, 1.0) * 50       # 最大50点
-        deep_ratio  = v["deep"] / total if total > 0 else 0
-        rem_ratio   = v["rem"]  / total if total > 0 else 0
-        score_deep  = min(deep_ratio  / 0.15, 1.0) * 25   # 最大25点
-        score_rem   = min(rem_ratio   / 0.20, 1.0) * 25   # 最大25点
-        quality = score_duration + score_deep + score_rem
-        result[d] = (round(total, 2), round(quality, 1))
+            v     = sleep_by_day[d]
+            total = v["total"]
+            if total >= 0.5:
+                score_duration = min(total / 8.0, 1.0) * 50
+                deep_ratio = v["deep"] / total if total > 0 else 0
+                rem_ratio  = v["rem"]  / total if total > 0 else 0
+                score_deep = min(deep_ratio / 0.15, 1.0) * 25
+                score_rem  = min(rem_ratio  / 0.20, 1.0) * 25
+                m.sleep_hours         = round(total, 2)
+                m.sleep_quality_score = round(score_duration + score_deep + score_rem, 1)
+        result.append(m)
 
     return result
 
@@ -303,10 +313,8 @@ def _parse_sleep(root) -> dict[date, tuple[float, float]]:
 def _parse_dt(s: Optional[str]) -> Optional[datetime]:
     if not s:
         return None
-    # Apple Health: "2024-07-20 05:00:00 +0900"
     s = s.strip()
     try:
-        # +0900 形式に対応
         dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S %z")
         return dt.astimezone(timezone.utc)
     except ValueError:

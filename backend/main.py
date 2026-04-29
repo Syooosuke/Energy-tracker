@@ -3,7 +3,7 @@ backend/main.py — Energy Tracker FastAPI Server
 起動: uvicorn backend.main:app --reload --port 8000
 """
 
-import os, sys, io, json, logging, datetime as _dt, time
+import os, sys, io, json, logging, datetime as _dt, time, asyncio
 from typing import Annotated, List, Literal, Optional
 from collections import defaultdict
 import numpy as np
@@ -1430,7 +1430,7 @@ from backend.models_db                 import Activity, ActivityPoint, DailyMetr
 
 # ファイルサイズ上限
 _FIT_MAX_BYTES         = 20 * 1024 * 1024   # 20 MB
-_APPLE_HEALTH_MAX_BYTES= 200 * 1024 * 1024  # 200 MB（一般的な export.xml の上限として十分）
+_APPLE_HEALTH_MAX_BYTES = 50 * 1024 * 1024  # 50 MB（Render free tier 512MB RAM に対する上限）
 
 
 # ── Pydantic モデル（新エンドポイント用） ─────────────
@@ -1599,7 +1599,11 @@ async def upload_apple_health(
         xml_source = file.file
 
     try:
-        health_data = parse_apple_health(xml_source)
+        # CPU/IO 集中処理をスレッドプールで実行してイベントループをブロックしない
+        health_data = await asyncio.to_thread(parse_apple_health, xml_source)
+    except ValueError as e:
+        logger.warning("Apple Health parse error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.warning("Apple Health parse error: %s", e)
         raise HTTPException(status_code=400, detail="Apple Health XMLの解析に失敗しました")
@@ -1628,10 +1632,10 @@ async def upload_apple_health(
         n_daily += 1
 
     # ── 個人モデル再学習 ──────────────────────────────
-    retrain_result = _retrain_personal_model(current_user.id, db)
+    retrain_result = await asyncio.to_thread(_retrain_personal_model, current_user.id, db)
 
     # ── 全 ATL/CTL/TSB 再計算 ─────────────────────────
-    _rebuild_pmc_for_user(current_user.id, hr_rest, hr_max, db)
+    await asyncio.to_thread(_rebuild_pmc_for_user, current_user.id, hr_rest, hr_max, db)
 
     return {
         "message":         "Apple Health データを取り込みました",
