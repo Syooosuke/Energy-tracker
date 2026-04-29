@@ -27,9 +27,12 @@ DBデータのサマリーと組み合わせて回答を生成する。
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
+
+_logger = logging.getLogger("energy_tracker.ai_query")
 
 try:
     import requests as _requests
@@ -110,14 +113,17 @@ class AIQueryEngine:
         )
 
         if not _REQUESTS_AVAILABLE:
+            _logger.warning("requests ライブラリが未インストールのため統計フォールバックを使用")
             return _fallback_answer(question, context)
 
         providers = _resolve_providers(self._provider)
+        _logger.info("AI providers to try: %s", [n for n, _ in providers])
 
         for name, call_fn in providers:
             try:
                 answer = call_fn(prompt)
                 if answer:
+                    _logger.info("AI provider '%s' succeeded", name)
                     return QueryResult(
                         answer=answer,
                         data_used=_detect_data_used(question),
@@ -125,9 +131,11 @@ class AIQueryEngine:
                         follow_up_suggestions=_suggest_follow_ups(question),
                         provider=name,
                     )
-            except Exception:
+            except Exception as e:
+                _logger.warning("AI provider '%s' failed: %s", name, e)
                 continue  # 次のプロバイダーを試みる
 
+        _logger.warning("全プロバイダー失敗、統計フォールバックを使用")
         return _fallback_answer(question, context)
 
 
@@ -222,7 +230,7 @@ def _call_groq(prompt: str) -> str:
     if not api_key:
         raise ValueError("GROQ_API_KEY not set")
 
-    model = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+    model = os.environ.get("GROQ_MODEL", "llama3-8b-8192")
     url = "https://api.groq.com/openai/v1/chat/completions"
     payload = {
         "model": model,
