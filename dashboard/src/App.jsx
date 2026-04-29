@@ -56,6 +56,15 @@ L.Icon.Default.mergeOptions({
 const glass      = "backdrop-blur-xl bg-white/[0.04] border border-white/[0.07]";
 const glassHover = "transition-all duration-200 hover:bg-white/[0.07] hover:border-white/[0.12]";
 
+/** FastAPI のエラーレスポンス (detail が string | object[] のどちらでも) を表示可能な文字列に変換する */
+const apiErr = (e, fallback = "エラーが発生しました") => {
+  const detail = e?.response?.data?.detail;
+  if (!detail) return e?.message || fallback;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map(d => d.msg ?? JSON.stringify(d)).join(" / ");
+  return fallback;
+};
+
 // バックエンド再起動を検知して自動リロードする hook
 function useBackendReloadDetector(intervalMs = 3000) {
   const bootTimeRef = useRef(null);
@@ -1965,7 +1974,7 @@ function ConditioningTab() {
       if (status === 401 || status === 403) {
         setFitError("認証エラーです。再ログインしてから再試行してください。");
       } else {
-        setFitError(e.response?.data?.detail || e.message);
+        setFitError(apiErr(e, "アップロードに失敗しました"));
       }
     } finally {
       setFitLoading(false);
@@ -1993,7 +2002,7 @@ function ConditioningTab() {
       if (status === 401 || status === 403) {
         setAhError("認証エラーです。再ログインしてから再試行してください。");
       } else {
-        setAhError(e.response?.data?.detail || e.message);
+        setAhError(apiErr(e, "アップロードに失敗しました"));
       }
     } finally {
       setAhLoading(false);
@@ -2370,7 +2379,7 @@ function VoiceInputPanel() {
       const r = await parseActivityText(transcript);
       setParsed(r);
     } catch (e) {
-      setError(e.response?.data?.detail || "解析に失敗しました");
+      setError(apiErr(e, "解析に失敗しました"));
     } finally {
       setLoading(false);
     }
@@ -2465,7 +2474,7 @@ function AIQueryPanel() {
       const r = await aiQuery(question);
       setResult(r);
     } catch (e) {
-      setError(e.response?.data?.detail || "クエリの実行に失敗しました");
+      setError(apiErr(e, "クエリの実行に失敗しました"));
     } finally {
       setLoading(false);
     }
@@ -2601,7 +2610,7 @@ function RaceSimulatorPanel() {
       });
       setResult(r);
     } catch (e) {
-      setError(e.response?.data?.detail || "シミュレーション失敗");
+      setError(apiErr(e, "シミュレーション失敗"));
     } finally {
       setLoading(false);
     }
@@ -2796,7 +2805,7 @@ function TrainingPlanPanel() {
       setActiveWeek(0);
       listTrainingPlans().then(setSavedPlans).catch(() => {});
     } catch (e) {
-      setError(e.response?.data?.detail || "プラン生成失敗");
+      setError(apiErr(e, "プラン生成失敗"));
     } finally {
       setLoading(false);
     }
@@ -3069,7 +3078,7 @@ function AIPlanAdjustPanel({ plan, activeWeek, onAdjust }) {
       setExplanation(r.explanation);
       setMessage("");
     } catch (e) {
-      setError(e.response?.data?.detail || "調整に失敗しました");
+      setError(apiErr(e, "調整に失敗しました"));
     } finally {
       setLoading(false);
     }
@@ -3184,7 +3193,7 @@ function GoalTimeProbPanel() {
       const r = await getGoalTimeProbability(form);
       setResult(r);
     } catch (e) {
-      setError(e.response?.data?.detail || "計算に失敗しました");
+      setError(apiErr(e, "計算に失敗しました"));
     } finally {
       setLoading(false);
     }
@@ -3288,7 +3297,7 @@ function RaceStrategyPanel() {
       const r = await generateRaceStrategy(form);
       setResult(r);
     } catch (e) {
-      setError(e.response?.data?.detail || "生成に失敗しました");
+      setError(apiErr(e, "生成に失敗しました"));
     } finally {
       setLoading(false);
     }
@@ -3559,7 +3568,7 @@ function RaceResultPanel() {
       const r = await submitRaceResult(payload);
       setResult(r);
     } catch (e) {
-      setError(e.response?.data?.detail || "保存に失敗しました");
+      setError(apiErr(e, "保存に失敗しました"));
     } finally {
       setLoading(false);
     }
@@ -3692,7 +3701,7 @@ function RouteCandidateComparePanel() {
       const rt = await uploadGPX(file);
       setCandidates(prev => prev.map((c, i) => i === idx ? { ...c, route: rt } : c));
     } catch (e) {
-      setError(`ルート${idx + 1}: ${e.response?.data?.detail || e.message || "GPX読み込みに失敗しました"}`);
+      setError(`ルート${idx + 1}: ${apiErr(e, "GPX読み込みに失敗しました")}`);
     }
   };
 
@@ -3718,7 +3727,7 @@ function RouteCandidateComparePanel() {
       const r = await compareRouteCandidates(payload);
       setResults(r.results);
     } catch (e) {
-      setError(e.response?.data?.detail || "比較に失敗しました");
+      setError(apiErr(e, "比較に失敗しました"));
     } finally {
       setLoading(false);
     }
@@ -3863,7 +3872,7 @@ function HydrationModal({ onClose, defaultTempC = 20, defaultDurationMin = 180, 
       const r = await calcHydration(form);
       setResult(r);
     } catch (e) {
-      alert(e.response?.data?.detail || "計算エラー");
+      alert(apiErr(e, "計算エラー"));
     } finally {
       setLoading(false);
     }
@@ -4042,7 +4051,7 @@ function ReportPanel() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      alert(e.response?.data?.detail || "レポート生成エラー");
+      alert(apiErr(e, "レポート生成エラー"));
     } finally {
       setLoading(false);
     }
@@ -4201,7 +4210,7 @@ function FeedbackPanel() {
       setShowForm(false);
       load();
     } catch (e) {
-      alert(e.response?.data?.detail || "送信エラー");
+      alert(apiErr(e, "送信エラー"));
     } finally {
       setLoading(false);
     }
@@ -4323,7 +4332,7 @@ function RouteComparePanel() {
       const r = await compareRoutes(selected, checkedIds);
       setSeries(r.series || []);
     } catch (e) {
-      alert(e.response?.data?.detail || "比較エラー");
+      alert(apiErr(e, "比較エラー"));
     } finally {
       setLoading(false);
     }
@@ -4578,7 +4587,7 @@ export default function App() {
   const apiErrMsg = (e) => {
     if (!e.response || (e.response.status >= 500 && !e.response?.data?.detail))
       return "バックエンドサーバーに接続できません。uvicorn を起動してください。";
-    return e.response?.data?.detail || e.message;
+    return apiErr(e);
   };
 
   /* ── Route fetch ── */
