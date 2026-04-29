@@ -3479,12 +3479,12 @@ function RouteLibraryPanel() {
                 {r.elevation_gain_m && <span>↑{Math.round(r.elevation_gain_m)}m</span>}
                 {r.activity_type && <span>{r.activity_type}</span>}
               </div>
-              {r.tags && (
+              {r.tags && r.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {r.tags.split(",").filter(Boolean).map(t => (
-                    <span key={t} onClick={() => setTagFilter(t.trim())}
+                  {(Array.isArray(r.tags) ? r.tags : r.tags.split(",").map(t => t.trim()).filter(Boolean)).map(t => (
+                    <span key={t} onClick={() => setTagFilter(t)}
                       className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/15 text-emerald-400 cursor-pointer hover:bg-emerald-500/20">
-                      #{t.trim()}
+                      #{t}
                     </span>
                   ))}
                 </div>
@@ -4527,12 +4527,23 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);  // 初回トークン検証完了フラグ
   const [appTab,    setAppTab]   = useState("route"); // "route" | "conditioning" | "tools"
 
-  // 起動時: Cookie が有効なら自動ログイン（HttpOnly Cookie は JS から読めないため常にAPIで確認）
+  // 起動時: Cookie が有効なら自動ログイン
   useEffect(() => {
     getMe()
       .then(u => setUser(u))
-      .catch(() => {})   // Cookie なし or 期限切れ → 未ログイン状態のまま
+      .catch(() => {})
       .finally(() => setAuthReady(true));
+  }, []);
+
+  // /shared/:token にアクセスした場合、共有ルートを取得して表示
+  const [sharedRoute, setSharedRoute] = useState(null);
+  useEffect(() => {
+    const m = window.location.pathname.match(/^\/shared\/([A-Za-z0-9_-]{10,64})$/);
+    if (!m) return;
+    const token = m[1];
+    getSharedRoute(token)
+      .then(data => setSharedRoute(data))
+      .catch(() => setSharedRoute({ error: true }));
   }, []);
 
   const handleAuth   = (u) => setUser(u);
@@ -4566,9 +4577,14 @@ export default function App() {
   const [optResult,     setOptResult]     = useState(null);
   const [showHydration, setShowHydration] = useState(false);
   const [showRaceMode,  setShowRaceMode]  = useState(false);
-  const [peerModal,     setPeerModal]     = useState(null); // {activityType, distanceKm, elevationGainM}
-  const [shareLoading,  setShareLoading]  = useState(false);
-  const [shareUrl,      setShareUrl]      = useState(null);
+  const [peerModal,          setPeerModal]          = useState(null);
+  const [shareLoading,       setShareLoading]       = useState(false);
+  const [shareUrl,           setShareUrl]           = useState(null);
+  const [saveLibOpen,        setSaveLibOpen]        = useState(false);
+  const [saveLibName,        setSaveLibName]        = useState("");
+  const [saveLibTags,        setSaveLibTags]        = useState("");
+  const [saveLibLoading,     setSaveLibLoading]     = useState(false);
+  const [saveLibDone,        setSaveLibDone]        = useState(false);
 
   const gpxInputRef = useRef(null);
 
@@ -4576,8 +4592,57 @@ export default function App() {
     getFoods().then(d => setFoods(Object.keys(d))).catch(() => {});
   }, []);
 
+  // 共有ルート表示（ログイン不要）
+  if (sharedRoute) {
+    if (sharedRoute.error) return (
+      <div className="min-h-screen bg-[#060912] text-white flex items-center justify-center">
+        <div className={`${glass} rounded-2xl p-8 text-center space-y-3 max-w-sm`}>
+          <AlertTriangle size={32} className="text-red-400 mx-auto" />
+          <p className="text-white/60 text-sm">共有ルートが見つかりません。リンクが無効か期限切れです。</p>
+          <button onClick={() => { setSharedRoute(null); window.history.replaceState({}, "", "/"); }}
+            className="px-4 py-2 rounded-xl bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-sm">
+            ホームへ
+          </button>
+        </div>
+      </div>
+    );
+    const r = sharedRoute;
+    const distKm = r.route?.distance_m ? (r.route.distance_m / 1000).toFixed(1) : null;
+    const ascent = r.route?.ascent_m ? Math.round(r.route.ascent_m) : null;
+    return (
+      <div className="min-h-screen bg-[#060912] text-white flex items-center justify-center p-4">
+        <div className={`${glass} rounded-2xl p-6 max-w-sm w-full space-y-4`}>
+          <div className="flex items-center gap-2 text-cyan-300 font-semibold">
+            <Share2 size={16} /> 共有ルート
+          </div>
+          <h2 className="text-lg font-bold text-white/90">{r.title || "ルート"}</h2>
+          <div className="flex gap-4 text-sm text-white/50">
+            {distKm && <span><Route size={12} className="inline mr-1" />{distKm}km</span>}
+            {ascent  && <span>↑{ascent}m</span>}
+          </div>
+          {r.supply_plan?.items?.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs text-white/40 uppercase tracking-wider">補給計画</p>
+              {r.supply_plan.items.map((s, i) => (
+                <div key={i} className="flex justify-between text-xs text-white/60 px-2 py-1 bg-white/[0.02] rounded-lg">
+                  <span>{s.food} × {s.qty}</span>
+                  <span className="text-white/30">{s.time_min}分</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-white/25">共有日: {r.created_at ? new Date(r.created_at).toLocaleDateString("ja-JP") : "-"}</p>
+          <button onClick={() => { setSharedRoute(null); window.history.replaceState({}, "", "/"); }}
+            className="w-full py-2 rounded-xl bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-sm hover:bg-indigo-500/30 transition-all">
+            アプリを使う
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // 未ログイン → ログイン画面
-  if (!authReady) return null;  // 初回検証中は何も表示しない
+  if (!authReady) return null;
   if (!user) return <AuthScreen onAuth={handleAuth} />;
 
   const foodList = foods.length > 0 ? foods : FOOD_DEFAULTS.map(s => s.food);
@@ -4667,6 +4732,29 @@ export default function App() {
     }
   };
 
+  /* ── Save to library ── */
+  const handleSaveToLibrary = async () => {
+    if (!saveLibName.trim() || !route) return;
+    setSaveLibLoading(true);
+    try {
+      await saveRouteToLibrary({
+        name: saveLibName.trim(),
+        description: "",
+        tags: saveLibTags.trim(),
+        route: route,
+        activity_type: activity,
+      });
+      setSaveLibDone(true);
+      setSaveLibOpen(false);
+      setSaveLibName("");
+      setSaveLibTags("");
+    } catch (e) {
+      setError("ライブラリ保存に失敗しました: " + apiErr(e));
+    } finally {
+      setSaveLibLoading(false);
+    }
+  };
+
   /* ── Simulate ── */
   const handleShare = async () => {
     if (!route || !result) return;
@@ -4674,15 +4762,14 @@ export default function App() {
     try {
       const r = await createSharedRoute({
         title: route.name || "ルート",
-        route_json: JSON.stringify(route),
-        supply_plan_json: JSON.stringify(supplies),
-        expires_hours: 168,
+        route: route,
+        supply_plan: { items: supplies },
       });
       const url = `${window.location.origin}/shared/${r.token}`;
       setShareUrl(url);
       try { await navigator.clipboard.writeText(url); } catch {}
-    } catch {
-      // ignore
+    } catch (e) {
+      setError("ルート共有に失敗しました: " + apiErr(e));
     } finally {
       setShareLoading(false);
     }
@@ -4733,12 +4820,15 @@ export default function App() {
 
       {/* Header */}
       <header className={`${glass} sticky top-0 z-50 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-2`}>
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <button
+          onClick={() => setAppTab("dashboard")}
+          className="flex items-center gap-2 sm:gap-3 min-w-0 hover:opacity-80 transition-opacity"
+        >
           <div className="w-7 h-7 sm:w-8 sm:h-8 flex-shrink-0 rounded-xl bg-gradient-to-br from-cyan-500/30 to-indigo-500/30 border border-white/10 flex items-center justify-center">
             <Zap size={14} className="text-cyan-400" />
           </div>
           <span className="text-sm font-bold tracking-tight whitespace-nowrap">Energy Tracker</span>
-        </div>
+        </button>
         <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
           {result && (
             <button
@@ -5182,17 +5272,46 @@ export default function App() {
               <SupplyCountdown simResult={result} raceStart={planDt} />
             )}
 
-            {/* ピア比較ボタン */}
+            {/* ライブラリに保存 */}
             {route && (
-              <button onClick={() => setPeerModal({
-                activityType: ["🏔️ 登山・ハイキング","🌲 トレイルランニング"].includes(activity) ? "hiking" :
-                               activity === "🏃 ランニング" ? "running" : "cycling",
-                distanceKm:   (route.distance_m || 0) / 1000,
-                elevationGainM: route.ascent_m || 0,
-              })}
-                className={`w-full py-2 rounded-xl border border-indigo-400/20 text-indigo-400/70 hover:text-indigo-300 hover:border-indigo-400/40 transition-all text-xs flex items-center justify-center gap-1.5`}>
-                <Award size={12} /> 同条件ユーザーと比較する
-              </button>
+              <div className="space-y-2">
+                {saveLibDone ? (
+                  <div className="text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 flex items-center gap-1.5">
+                    <CheckCircle2 size={12} /> ライブラリに保存しました
+                  </div>
+                ) : saveLibOpen ? (
+                  <div className={`${glass} rounded-xl p-3 space-y-2`}>
+                    <p className="text-[11px] text-white/50 font-medium">ルートをライブラリに保存</p>
+                    <input
+                      value={saveLibName}
+                      onChange={e => setSaveLibName(e.target.value)}
+                      placeholder="ルート名（必須）"
+                      className={`${glass} w-full px-3 py-1.5 rounded-lg text-white/80 text-xs outline-none placeholder:text-white/25`}
+                    />
+                    <input
+                      value={saveLibTags}
+                      onChange={e => setSaveLibTags(e.target.value)}
+                      placeholder="タグ（カンマ区切り例: 富士山,夏山）"
+                      className={`${glass} w-full px-3 py-1.5 rounded-lg text-white/80 text-xs outline-none placeholder:text-white/25`}
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={handleSaveToLibrary} disabled={!saveLibName.trim() || saveLibLoading}
+                        className="flex-1 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-medium disabled:opacity-40 hover:bg-emerald-500/30 transition-all flex items-center justify-center gap-1">
+                        {saveLibLoading ? <Loader2 size={11} className="animate-spin" /> : <BookOpen size={11} />} 保存
+                      </button>
+                      <button onClick={() => setSaveLibOpen(false)}
+                        className="px-3 py-1.5 rounded-lg text-white/30 text-xs hover:text-white/60 transition-colors">
+                        キャンセル
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setSaveLibOpen(true)}
+                    className="w-full py-2 rounded-xl border border-emerald-400/20 text-emerald-400/70 hover:text-emerald-300 hover:border-emerald-400/40 transition-all text-xs flex items-center justify-center gap-1.5">
+                    <BookOpen size={12} /> ライブラリに保存
+                  </button>
+                )}
+              </div>
             )}
 
             {/* ルート共有ボタン */}
@@ -5240,15 +5359,7 @@ export default function App() {
         />
       )}
 
-      {/* ピア比較モーダル */}
-      {peerModal && (
-        <PeerCompareModal
-          activityType={peerModal.activityType}
-          distanceKm={peerModal.distanceKm}
-          elevationGainM={peerModal.elevationGainM}
-          onClose={() => setPeerModal(null)}
-        />
-      )}
+      {/* ピア比較モーダル（非表示） */}
     </div>
   );
 }
