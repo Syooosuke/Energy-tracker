@@ -3475,7 +3475,7 @@ function RouteLibraryPanel() {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-white/80">{r.name}</p>
               <div className="flex flex-wrap gap-2 mt-0.5 text-[10px] text-white/35">
-                {r.distance_m && <span>{(r.distance_m / 1000).toFixed(1)}km</span>}
+                {r.distance_km && <span>{r.distance_km.toFixed(1)}km</span>}
                 {r.elevation_gain_m && <span>↑{Math.round(r.elevation_gain_m)}m</span>}
                 {r.activity_type && <span>{r.activity_type}</span>}
               </div>
@@ -4079,6 +4079,14 @@ function ReportPanel() {
   const weekOptions  = periods?.weeks  || [];
   const curOpts = selType === "monthly" ? monthOptions : weekOptions;
 
+  // 週次に切り替えた直後に selWeek が null のままだと 422 になるので自動補完
+  useEffect(() => {
+    if (selType === "weekly" && selWeek === null && weekOptions.length > 0) {
+      setSelYear(weekOptions[0].year);
+      setSelWeek(weekOptions[0].week);
+    }
+  }, [selType, weekOptions]);
+
   return (
     <div className={`${glass} rounded-2xl p-5 space-y-4`}>
       <div className="flex items-center gap-2 text-xs font-semibold text-white/60 uppercase tracking-wider">
@@ -4119,7 +4127,7 @@ function ReportPanel() {
         </div>
       </div>
 
-      <button onClick={handleDownload} disabled={loading || curOpts.length === 0}
+      <button onClick={handleDownload} disabled={loading || curOpts.length === 0 || (selType === "weekly" && selWeek === null)}
         className="w-full py-2 rounded-xl bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-40">
         {loading ? <><Loader2 size={13} className="animate-spin" />生成中...</> : "PDFダウンロード"}
       </button>
@@ -4536,14 +4544,17 @@ export default function App() {
   }, []);
 
   // /shared/:token にアクセスした場合、共有ルートを取得して表示
-  const [sharedRoute, setSharedRoute] = useState(null);
+  const _isSharedPath = !!window.location.pathname.match(/^\/shared\/([A-Za-z0-9_-]{10,64})$/);
+  const [sharedRoute,   setSharedRoute]   = useState(null);
+  const [sharedLoading, setSharedLoading] = useState(_isSharedPath);
   useEffect(() => {
     const m = window.location.pathname.match(/^\/shared\/([A-Za-z0-9_-]{10,64})$/);
     if (!m) return;
     const token = m[1];
     getSharedRoute(token)
       .then(data => setSharedRoute(data))
-      .catch(() => setSharedRoute({ error: true }));
+      .catch(() => setSharedRoute({ error: true }))
+      .finally(() => setSharedLoading(false));
   }, []);
 
   const handleAuth   = (u) => setUser(u);
@@ -4593,6 +4604,11 @@ export default function App() {
   }, []);
 
   // 共有ルート表示（ログイン不要）
+  if (sharedLoading) return (
+    <div className="min-h-screen bg-[#060912] flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-cyan-400/40 border-t-cyan-400 rounded-full animate-spin" />
+    </div>
+  );
   if (sharedRoute) {
     if (sharedRoute.error) return (
       <div className="min-h-screen bg-[#060912] text-white flex items-center justify-center">
@@ -4761,7 +4777,7 @@ export default function App() {
     setShareLoading(true); setShareUrl(null);
     try {
       const r = await createSharedRoute({
-        title: route.name || "ルート",
+        title: (start?.name && goal?.name) ? `${start.name} → ${goal.name}` : (gpxFile?.name?.replace(/\.gpx$/i, "") || "ルート"),
         route: route,
         supply_plan: { items: supplies },
       });
