@@ -1987,7 +1987,7 @@ function ConditioningTab() {
     try {
       const r = await uploadAppleHealth(file, hrMax, hrRest);
       setAhResult(r);
-      fetchAll();
+      if (r.status !== "processing") fetchAll();
     } catch (e) {
       const status = e.response?.status;
       if (status === 401 || status === 403) {
@@ -2068,13 +2068,13 @@ function ConditioningTab() {
             icon={Smartphone}
             onFile={handleAhUpload}
             loading={ahLoading}
-            result={ahResult ? `${ahResult.n_workouts}件のワークアウト / ${ahResult.n_daily_metrics}日分のデータを取り込みました` : null}
+            result={ahResult ? (ahResult.status === "processing" ? ahResult.message : `${ahResult.n_workouts}件のワークアウト / ${ahResult.n_daily_metrics}日分のデータを取り込みました`) : null}
             error={ahError}
           />
         </div>
 
         {/* アップロード後の再学習結果 */}
-        {(fitResult?.model_retrained || ahResult?.model_retrained) && (() => {
+        {(fitResult?.model_retrained || (ahResult?.model_retrained && ahResult?.status !== "processing")) && (() => {
           const r = fitResult?.model_retrained ?? ahResult?.model_retrained;
           return (
             <div className="text-[11px] bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-3 py-2 text-indigo-300">

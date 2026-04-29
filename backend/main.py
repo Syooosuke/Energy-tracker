@@ -24,7 +24,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "models"))
 
-from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Depends, Query
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Depends, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -35,7 +35,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from backend.database  import get_db, init_db
+from backend.database  import get_db, init_db, SessionLocal
 from backend.models_db import User
 from backend.auth      import (
     hash_password, verify_password, create_token,
@@ -1543,106 +1543,117 @@ async def upload_garmin_fit(
 # Apple Health アップロード
 # ══════════════════════════════════════════════════════
 
+def _apple_health_background(
+    content: bytes,
+    fname: str,
+    user_id: int,
+    hr_max: float,
+    hr_rest: float,
+) -> None:
+    """
+    Apple Health XML をバックグラウンドで処理する。
+    リクエストのタイムアウトを回避するため、レスポンス返却後に実行される。
+    独自に DB セッションを作成し、完了後に必ずクローズする。
+    """
+    import zipfile as _zipfile
+
+    db = SessionLocal()
+    try:
+        # ZIP → XML 展開
+        if fname.endswith(".zip"):
+            try:
+                zf = _zipfile.ZipFile(io.BytesIO(content))
+                xml_name = next((n for n in zf.namelist() if n.endswith("export.xml")), None)
+                if not xml_name:
+                    logger.error("Apple Health BG: ZIP 内に export.xml なし (user=%d)", user_id)
+                    return
+                xml_source = zf.open(xml_name)
+            except _zipfile.BadZipFile:
+                logger.error("Apple Health BG: 不正な ZIP (user=%d)", user_id)
+                return
+        else:
+            xml_source = io.BytesIO(content)
+
+        health_data = parse_apple_health(xml_source)
+
+        n_workouts = 0
+        n_daily    = 0
+
+        # ── ワークアウト保存 ──────────────────────────
+        for w in health_data.workouts:
+            norm     = from_apple_workout(w)
+            activity = _save_activity(norm, user_id, db)
+            if activity.avg_hr and activity.duration_sec:
+                activity.trimp = calc_trimp(
+                    duration_min = activity.duration_sec / 60,
+                    avg_hr       = activity.avg_hr,
+                    hr_rest      = hr_rest,
+                    hr_max       = hr_max,
+                )
+            n_workouts += 1
+
+        # ── デイリーメトリクス保存 ────────────────────
+        for dm in health_data.daily_metrics:
+            _upsert_daily_metrics(user_id, dm, db)
+            n_daily += 1
+
+        db.commit()  # 全変更を一括コミット
+
+        # ── 個人モデル再学習 + PMC 再計算 ─────────────
+        _retrain_personal_model(user_id, db)
+        _rebuild_pmc_for_user(user_id, hr_rest, hr_max, db)
+
+        logger.info(
+            "Apple Health BG 完了: user=%d workouts=%d daily=%d",
+            user_id, n_workouts, n_daily,
+        )
+
+    except Exception as e:
+        logger.error("Apple Health BG エラー: user=%d %s", user_id, e, exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
 @app.post("/api/upload/apple-health")
 @limiter.limit("5/minute")
 async def upload_apple_health(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     hr_max:  float = 185.0,
     hr_rest: float = 60.0,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """
-    Apple Health の export.xml をアップロードする。
-
-    エクスポート方法:
-      iPhone → ヘルスケア → 右上アイコン → ヘルスケアデータを書き出す
-      → export.zip を展開 → export.xml を送信
-
-    取り込み対象:
-      - ワークアウト（ハイキング/ランニング/サイクリング）
-      - 心拍数時系列
-      - HRV / 安静時心拍 / SpO2 / VO2max / 睡眠
-
-    保存後、個人化モデルを自動再学習する。
+    Apple Health の export.xml / export.zip をアップロードする。
+    ファイルを受け取り即座にレスポンスを返し、実際の処理はバックグラウンドで行う。
     """
     fname = (file.filename or "").lower()
     if not (fname.endswith(".xml") or fname.endswith(".zip")):
         raise HTTPException(status_code=400, detail="export.xml または export.zip のみ受け付けます")
 
-    # Content-Length ヘッダーで事前チェック（nginx が先に弾くが念のため）
-    cl = request.headers.get("content-length")
-    if cl and int(cl) > _APPLE_HEALTH_MAX_BYTES:
+    # ファイル全体を読み込んでサイズチェック
+    content = await file.read()
+    if len(content) > _APPLE_HEALTH_MAX_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"ファイルサイズが上限（{_APPLE_HEALTH_MAX_BYTES // 1024 // 1024}MB）を超えています",
+            detail=f"ファイルサイズが上限（{_APPLE_HEALTH_MAX_BYTES // 1024 // 1024}MB）を超えています。"
+                   "export.zip のまま（解凍せず）アップロードするか、期間を絞ってエクスポートしてください。",
         )
 
-    # SpooledTemporaryFile（ディスク上）から直接ストリーム解析する。
-    # _read_upload で全バイトをメモリに蓄積してから ET.fromstring() すると
-    # ファイルサイズ × 3 程度のメモリを消費するため、ファイルオブジェクトを
-    # 直接パーサーに渡してメモリ使用量を大幅に削減する。
-    import zipfile as _zipfile
-
-    await file.seek(0)
-    if fname.endswith(".zip"):
-        try:
-            _zf = _zipfile.ZipFile(file.file)
-            _xml_name = next((n for n in _zf.namelist() if n.endswith("export.xml")), None)
-            if not _xml_name:
-                raise HTTPException(status_code=400, detail="ZIP 内に export.xml が見つかりません")
-            xml_source = _zf.open(_xml_name)
-        except _zipfile.BadZipFile:
-            raise HTTPException(status_code=400, detail="ZIP ファイルの解析に失敗しました")
-    else:
-        xml_source = file.file
-
-    try:
-        # CPU/IO 集中処理をスレッドプールで実行してイベントループをブロックしない
-        health_data = await asyncio.to_thread(parse_apple_health, xml_source)
-    except ValueError as e:
-        logger.warning("Apple Health parse error: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.warning("Apple Health parse error: %s", e)
-        raise HTTPException(status_code=400, detail="Apple Health XMLの解析に失敗しました")
-
-    n_workouts = 0
-    n_daily    = 0
-
-    # ── ワークアウト保存 ───────────────────────────────
-    for w in health_data.workouts:
-        norm = from_apple_workout(w)
-        activity = _save_activity(norm, current_user.id, db)
-
-        if activity.avg_hr and activity.duration_sec:
-            activity.trimp = calc_trimp(
-                duration_min = activity.duration_sec / 60,
-                avg_hr       = activity.avg_hr,
-                hr_rest      = hr_rest,
-                hr_max       = hr_max,
-            )
-        db.commit()
-        n_workouts += 1
-
-    # ── デイリーメトリクス保存 ────────────────────────
-    for dm in health_data.daily_metrics:
-        _upsert_daily_metrics(current_user.id, dm, db)
-        n_daily += 1
-
-    # ── 個人モデル再学習 ──────────────────────────────
-    retrain_result = await asyncio.to_thread(_retrain_personal_model, current_user.id, db)
-
-    # ── 全 ATL/CTL/TSB 再計算 ─────────────────────────
-    await asyncio.to_thread(_rebuild_pmc_for_user, current_user.id, hr_rest, hr_max, db)
+    # バックグラウンドタスクとしてキュー登録（タイムアウト回避）
+    background_tasks.add_task(
+        _apple_health_background,
+        content, fname, current_user.id, hr_max, hr_rest,
+    )
 
     return {
-        "message":         "Apple Health データを取り込みました",
-        "n_workouts":      n_workouts,
-        "n_daily_metrics": n_daily,
-        "hr_timeseries_rows": len(health_data.hr_timeseries),
-        "model_retrained": retrain_result,
+        "message": "アップロードを受け付けました。処理は数分で完了します。完了後にページを更新するとデータが反映されます。",
+        "status":  "processing",
     }
 
 
