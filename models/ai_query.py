@@ -248,31 +248,48 @@ def _call_gemini(prompt: str) -> str:
 
 
 def _call_groq(prompt: str) -> str:
-    """Groq API (llama-3.1-8b-instant) — 無料枠: 14,400 req/日・超高速"""
+    """Groq API — 無料枠: 14,400 req/日・超高速"""
     api_key = os.environ.get("GROQ_API_KEY", "")
     if not api_key:
         raise ValueError("GROQ_API_KEY not set")
 
-    model = os.environ.get("GROQ_MODEL", "llama3-8b-8192")
+    # 利用可能なモデルを優先順に試す
+    model_env = os.environ.get("GROQ_MODEL", "")
+    models = [model_env] if model_env else [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+        "gemma2-9b-it",
+    ]
     url = "https://api.groq.com/openai/v1/chat/completions"
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "max_tokens": 1024,
-        "temperature": 0.3,
-    }
-    resp = _requests.post(
-        url,
-        json=payload,
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"]
+
+    last_err = None
+    for model in models:
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 1024,
+            "temperature": 0.3,
+        }
+        resp = _requests.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30,
+        )
+        if resp.status_code == 400:
+            err_body = resp.json().get("error", {}).get("message", resp.text)
+            _logger.warning("Groq model '%s' rejected (400): %s", model, err_body)
+            last_err = Exception(f"Groq 400: {err_body}")
+            continue
+        resp.raise_for_status()
+        _logger.info("Groq using model: %s", model)
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+    raise last_err or Exception("Groq: no working model found")
 
 
 def _call_ollama(prompt: str) -> str:
