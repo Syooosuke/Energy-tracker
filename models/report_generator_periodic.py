@@ -65,21 +65,12 @@ JP = _register_jp_font()
 def _setup_jp_font():
     """
     matplotlib で日本語を正しく描画するためのフォント設定。
-    japanize-matplotlib（フォントをバンドル）を優先し、
-    なければシステムフォントを検索する。
+    models/fonts/ipaexg.ttf（リポジトリにバンドル）を優先的に使用する。
     """
     import os
     import matplotlib.font_manager as fm
 
     rcParams["axes.unicode_minus"] = False  # マイナス記号の文字化け防止
-
-    # ── 方法1: japanize-matplotlib（IPAexGothic をバンドル、最も確実） ──
-    try:
-        import japanize_matplotlib  # noqa: F401  — import するだけで rcParams が設定される
-        print("[PDF font] japanize-matplotlib loaded (IPAexGothic)", flush=True)
-        return
-    except ImportError:
-        print("[PDF font] japanize-matplotlib not installed, trying system fonts", flush=True)
 
     def _apply(path: str) -> bool:
         try:
@@ -95,15 +86,19 @@ def _setup_jp_font():
             print(f"[PDF font] Failed to load {path}: {e}", flush=True)
             return False
 
-    # ── 方法2: 既知パスを直接チェック ──────────────────────────────────
-    known_paths = [
+    # ── 方法1: リポジトリにバンドルした IPAexGothic（最優先・確実） ────
+    _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+    bundled = os.path.join(_THIS_DIR, "fonts", "ipaexg.ttf")
+    if os.path.exists(bundled) and _apply(bundled):
+        return
+
+    # ── 方法2: システムフォントの既知パス ──────────────────────────────
+    for path in [
         "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
         "/usr/share/fonts/truetype/ipafont-gothic/ipag.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    ]
-    for path in known_paths:
+    ]:
         if os.path.exists(path) and _apply(path):
             return
 
