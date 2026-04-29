@@ -117,11 +117,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline'; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
                 "font-src 'self' https://fonts.gstatic.com; "
-                "img-src 'self' data: https: blob:; "
-                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de; "
+                "img-src 'self' data: https: blob: https://*.tile.openstreetmap.org https://cdnjs.cloudflare.com; "
+                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de https://*.tile.openstreetmap.org; "
                 "manifest-src 'self'; "
+                "worker-src blob:; "
                 "frame-ancestors 'none'"
             )
         # キャッシュ制御（認証情報を含むレスポンスはキャッシュしない）
@@ -1192,14 +1193,15 @@ def api_simulate(request: Request, req: SimulateRequest):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         logger.error(
             "Simulation error [activity=%r, coords=%d pts]: %s",
             act_key, len(coords), e, exc_info=True,
         )
-        raise HTTPException(
-            status_code=500,
-            detail="シミュレーション計算中にエラーが発生しました。入力値を確認してください。",
-        )
+        detail = f"シミュレーション計算中にエラーが発生しました。入力値を確認してください。"
+        if os.environ.get("DEBUG"):
+            detail += f" [{type(e).__name__}: {e}]\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=detail)
 
 
 # ──────────────────────────────────────────────────────────────────────

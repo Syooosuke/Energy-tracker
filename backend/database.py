@@ -10,9 +10,15 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-# データベースファイルのパス（data/ ボリューム内に置く）
-_DB_DIR  = os.path.join(os.path.dirname(__file__), "..", "data")
-DB_PATH  = os.path.join(_DB_DIR, "energy_tracker.db")
+# データベースファイルのパス
+# 環境変数 DB_PATH が設定されていればそれを使う（Renderの永続ディスク用）
+# なければデフォルトの data/ ディレクトリ
+if os.environ.get("DB_PATH"):
+    DB_PATH = os.environ["DB_PATH"]
+    _DB_DIR = os.path.dirname(DB_PATH)
+else:
+    _DB_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+    DB_PATH = os.path.join(_DB_DIR, "energy_tracker.db")
 DB_URL   = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(
