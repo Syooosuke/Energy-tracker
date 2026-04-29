@@ -3,7 +3,7 @@
  * アクティビティ別エネルギー補給予測アプリ
  */
 
-import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useCallback, createContext, useContext, Component } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
@@ -64,6 +64,25 @@ const apiErr = (e, fallback = "エラーが発生しました") => {
   if (Array.isArray(detail)) return detail.map(d => d.msg ?? JSON.stringify(d)).join(" / ");
   return fallback;
 };
+
+/** パネル単位のエラーバウンダリー — クラッシュしても画面全体は真っ暗にならない */
+class PanelErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="backdrop-blur-xl bg-white/[0.04] border border-red-500/30 rounded-2xl p-5">
+          <p className="text-xs text-red-400 font-semibold mb-1">表示エラー</p>
+          <p className="text-[11px] text-white/40">{this.state.error?.message || "予期しないエラーが発生しました"}</p>
+          <button onClick={() => this.setState({ error: null })}
+            className="mt-3 text-[11px] text-white/50 underline">再試行</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // バックエンド再起動を検知して自動リロードする hook
 function useBackendReloadDetector(intervalMs = 3000) {
@@ -3495,14 +3514,14 @@ function AIRaceTab() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="space-y-4">
-          <AIQueryPanel />
-          <GoalTimeProbPanel />
-          <RaceStrategyPanel />
-          <RaceResultPanel />
+          <PanelErrorBoundary><AIQueryPanel /></PanelErrorBoundary>
+          <PanelErrorBoundary><GoalTimeProbPanel /></PanelErrorBoundary>
+          <PanelErrorBoundary><RaceStrategyPanel /></PanelErrorBoundary>
+          <PanelErrorBoundary><RaceResultPanel /></PanelErrorBoundary>
         </div>
         <div className="space-y-4">
-          <TrainingPlanPanel />
-          <RaceSimulatorPanel />
+          <PanelErrorBoundary><TrainingPlanPanel /></PanelErrorBoundary>
+          <PanelErrorBoundary><RaceSimulatorPanel /></PanelErrorBoundary>
         </div>
       </div>
     </div>

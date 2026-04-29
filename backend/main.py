@@ -4638,4 +4638,8 @@ if os.path.isdir(_DIST_DIR):
         file_path = os.path.join(_DIST_DIR, full_path)
         if os.path.isfile(file_path):
             return FileResponse(file_path)
-        return FileResponse(os.path.join(_DIST_DIR, "index.html"))
+        # index.html は必ずサーバーから最新版を取得させる（ブラウザキャッシュ防止）
+        return FileResponse(
+            os.path.join(_DIST_DIR, "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
