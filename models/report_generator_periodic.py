@@ -63,42 +63,78 @@ JP = _register_jp_font()
 
 # ── matplotlib 日本語フォント ──────────────────────
 def _setup_jp_font():
+    """
+    matplotlib で日本語を正しく描画するためのフォント設定。
+    fc-list → 既知パス → フォント名検索 の順で試みる。
+    """
     import os
+    import subprocess
     import matplotlib.font_manager as fm
 
     rcParams["axes.unicode_minus"] = False  # マイナス記号の文字化け防止
 
-    # Docker/Linux 環境のフォントファイルを直接指定（優先）
-    noto_paths = [
+    def _apply(path: str) -> bool:
+        """フォントファイルを rcParams に登録して True を返す。失敗時は False。"""
+        try:
+            fm.fontManager.addfont(path)
+            prop = fm.FontProperties(fname=path)
+            name = prop.get_name()
+            current = list(rcParams.get("font.sans-serif", []))
+            rcParams["font.sans-serif"] = [name] + [f for f in current if f != name]
+            rcParams["font.family"] = "sans-serif"
+            print(f"[PDF font] Using Japanese font: {name!r} ({path})", flush=True)
+            return True
+        except Exception as e:
+            print(f"[PDF font] Failed to load {path}: {e}", flush=True)
+            return False
+
+    # ── 方法1: fc-list で日本語対応フォントを動的検索（Linux/Docker） ──
+    try:
+        result = subprocess.run(
+            ["fc-list", ":lang=ja", "--format=%{file}\n"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            path = line.strip()
+            if path and os.path.exists(path):
+                if _apply(path):
+                    return
+    except Exception as e:
+        print(f"[PDF font] fc-list failed: {e}", flush=True)
+
+    # ── 方法2: 既知パスを直接チェック ──────────────────────────────────
+    known_paths = [
+        # IPAGothic (fonts-ipafont-gothic パッケージ — 最も確実)
+        "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "/usr/share/fonts/truetype/ipafont-gothic/ipag.ttf",
+        "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
+        # Noto CJK (fonts-noto-cjk パッケージ)
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
     ]
-    for path in noto_paths:
+    for path in known_paths:
         if os.path.exists(path):
-            fm.fontManager.addfont(path)
-            prop = fm.FontProperties(fname=path)
-            name = prop.get_name()
-            # font.sans-serif リストの先頭に追加（直接代入より確実）
-            current = list(rcParams.get("font.sans-serif", []))
-            rcParams["font.sans-serif"] = [name] + [f for f in current if f != name]
-            rcParams["font.family"] = "sans-serif"
-            return
+            if _apply(path):
+                return
 
-    # フォント名で検索（macOS / 手動インストール環境）
-    candidates = [
+    # ── 方法3: matplotlib のフォントキャッシュから名前で検索（macOS等） ─
+    name_candidates = [
+        "IPAGothic", "IPAexGothic", "IPA Gothic",
         "Hiragino Sans", "Hiragino Kaku Gothic ProN",
-        "Noto Sans CJK JP", "AppleGothic", "IPAexGothic",
+        "Noto Sans CJK JP", "Noto Sans CJK SC", "AppleGothic",
     ]
     available = {f.name for f in fm.fontManager.ttflist}
-    for font in candidates:
+    for font in name_candidates:
         if font in available:
             current = list(rcParams.get("font.sans-serif", []))
             rcParams["font.sans-serif"] = [font] + [f for f in current if f != font]
             rcParams["font.family"] = "sans-serif"
+            print(f"[PDF font] Using font by name: {font!r}", flush=True)
             return
+
+    print("[PDF font] WARNING: No Japanese font found. Legend text may be garbled.", flush=True)
     rcParams["font.family"] = "sans-serif"
 
 _setup_jp_font()
