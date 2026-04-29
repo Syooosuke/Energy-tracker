@@ -119,8 +119,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "script-src 'self' 'unsafe-inline'; "
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
                 "font-src 'self' https://fonts.gstatic.com; "
-                "img-src 'self' data: https: blob: https://*.tile.openstreetmap.org https://cdnjs.cloudflare.com; "
-                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de https://*.tile.openstreetmap.org; "
+                "img-src 'self' data: https: blob:; "
+                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de https://tile.openstreetmap.org https://*.tile.openstreetmap.org; "
                 "manifest-src 'self'; "
                 "worker-src blob:; "
                 "frame-ancestors 'none'"
@@ -164,9 +164,13 @@ _BOOT_TIME = _dt.datetime.now(tz=_dt.timezone.utc).isoformat()
 @app.on_event("startup")
 def on_startup():
     """起動時にDBテーブルを作成し、カラム追加マイグレーションを実行する（冪等）。"""
-    init_db()
-    _run_column_migrations()
-    logger.info("Database initialized.")
+    try:
+        init_db()
+        _run_column_migrations()
+        logger.info("Database initialized.")
+    except Exception as e:
+        logger.error("Database initialization failed: %s — continuing without DB.", e)
+        logger.warning("Auth/user features will be unavailable until DB is reachable.")
 
 
 @app.get("/api/boot-time")
@@ -177,55 +181,71 @@ def get_boot_time(request: Request):
 
 
 def _run_column_migrations():
-    """Alembic なし環境での冪等なカラム追加。"""
+    """Alembic なし環境での冪等なカラム追加。SQLite/PostgreSQL 両対応。"""
     from backend.database import engine
     from sqlalchemy import text
-    migrations = [
+
+    is_pg = engine.dialect.name == "postgresql"
+    _auto = "SERIAL" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    _pk   = "GENERATED ALWAYS AS IDENTITY PRIMARY KEY" if is_pg else "PRIMARY KEY AUTOINCREMENT"
+    _ts   = "TIMESTAMP" if is_pg else "DATETIME"
+
+    sqlite_migrations = [
         "ALTER TABLE activities ADD COLUMN gpx_fingerprint VARCHAR(64)",
         "ALTER TABLE activities ADD COLUMN humidity_pct FLOAT",
         "ALTER TABLE activities ADD COLUMN wind_speed_ms FLOAT",
-        "CREATE TABLE IF NOT EXISTS training_plans ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  user_id INTEGER NOT NULL,"
-        "  race_name VARCHAR(200) NOT NULL,"
-        "  race_date DATE NOT NULL,"
-        "  race_distance_km FLOAT NOT NULL,"
-        "  activity_type VARCHAR(30) NOT NULL,"
-        "  current_ctl FLOAT,"
-        "  target_ctl FLOAT,"
-        "  plan_json TEXT NOT NULL,"
-        "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
-        ")",
-        "CREATE TABLE IF NOT EXISTS saved_routes ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  user_id INTEGER NOT NULL,"
-        "  name VARCHAR(100) NOT NULL,"
-        "  description TEXT,"
-        "  tags VARCHAR(500),"
-        "  route_json TEXT NOT NULL,"
-        "  distance_m FLOAT,"
-        "  elevation_gain_m FLOAT,"
-        "  activity_type VARCHAR(30),"
-        "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
-        ")",
-        "CREATE TABLE IF NOT EXISTS shared_routes ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "  user_id INTEGER NOT NULL,"
-        "  token VARCHAR(64) NOT NULL UNIQUE,"
-        "  title VARCHAR(200),"
-        "  route_json TEXT NOT NULL,"
-        "  supply_plan_json TEXT,"
-        "  expires_at DATETIME,"
-        "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
-        ")",
     ]
+    pg_migrations = [
+        "ALTER TABLE activities ADD COLUMN IF NOT EXISTS gpx_fingerprint VARCHAR(64)",
+        "ALTER TABLE activities ADD COLUMN IF NOT EXISTS humidity_pct FLOAT",
+        "ALTER TABLE activities ADD COLUMN IF NOT EXISTS wind_speed_ms FLOAT",
+    ]
+    alter_migrations = pg_migrations if is_pg else sqlite_migrations
+
+    table_migrations = [
+        f"CREATE TABLE IF NOT EXISTS training_plans ("
+        f"  id {_auto},"
+        f"  user_id INTEGER NOT NULL,"
+        f"  race_name VARCHAR(200) NOT NULL,"
+        f"  race_date DATE NOT NULL,"
+        f"  race_distance_km FLOAT NOT NULL,"
+        f"  activity_type VARCHAR(30) NOT NULL,"
+        f"  current_ctl FLOAT,"
+        f"  target_ctl FLOAT,"
+        f"  plan_json TEXT NOT NULL,"
+        f"  created_at {_ts} DEFAULT CURRENT_TIMESTAMP"
+        f")",
+        f"CREATE TABLE IF NOT EXISTS saved_routes ("
+        f"  id {_auto},"
+        f"  user_id INTEGER NOT NULL,"
+        f"  name VARCHAR(100) NOT NULL,"
+        f"  description TEXT,"
+        f"  tags VARCHAR(500),"
+        f"  route_json TEXT NOT NULL,"
+        f"  distance_m FLOAT,"
+        f"  elevation_gain_m FLOAT,"
+        f"  activity_type VARCHAR(30),"
+        f"  created_at {_ts} DEFAULT CURRENT_TIMESTAMP"
+        f")",
+        f"CREATE TABLE IF NOT EXISTS shared_routes ("
+        f"  id {_auto},"
+        f"  user_id INTEGER NOT NULL,"
+        f"  token VARCHAR(64) NOT NULL UNIQUE,"
+        f"  title VARCHAR(200),"
+        f"  route_json TEXT NOT NULL,"
+        f"  supply_plan_json TEXT,"
+        f"  expires_at {_ts},"
+        f"  created_at {_ts} DEFAULT CURRENT_TIMESTAMP"
+        f")",
+    ]
+
     with engine.connect() as conn:
-        for sql in migrations:
+        for sql in alter_migrations + table_migrations:
             try:
                 conn.execute(text(sql))
                 conn.commit()
             except Exception:
-                pass  # 既にカラムが存在する場合は無視
+                pass  # 既にカラム/テーブルが存在する場合は無視
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -450,10 +470,11 @@ def _make_synthetic_df():
     speeds = np.clip(1.2 * np.exp(-0.04 * np.abs(slopes)), 0.1, 2.0)
     hrs    = np.clip(80 + np.abs(slopes) * 1.5 + np.random.normal(0, 5, n), 60, 180)
     return pd.DataFrame({
-        "timestamp":  pd.date_range("2024-01-01", periods=n, freq="10s"),
-        "slope_pct":  slopes,
-        "speed_ms":   speeds,
-        "heart_rate": hrs,
+        "timestamp":    pd.date_range("2024-01-01", periods=n, freq="10s"),
+        "slope_pct":    slopes,
+        "speed_ms":     speeds,
+        "speed_smooth": speeds,  # pace_predictor.py が要求するカラム
+        "heart_rate":   hrs,
     })
 
 def _build_engine_a(df, slope_arr, profile: UserProfile):
@@ -1080,11 +1101,8 @@ def api_simulate(request: Request, req: SimulateRequest):
     )
 
     try:
-        logger.info("SIM step1: loading df")
         df       = _load_df()
-        logger.info("SIM step2: building engine_a (df rows=%d)", len(df))
         engine_a = _build_engine_a(df, slope_arr, prof)
-        logger.info("SIM step3: building supply_events")
 
         supply_events = []
         for s in req.supplies:
@@ -1096,7 +1114,6 @@ def api_simulate(request: Request, req: SimulateRequest):
             ))
         supply_events = sorted(supply_events, key=lambda e: e.time_min)
 
-        logger.info("SIM step4: building alert_config")
         alert_config = AlertConfig(e_crit_kcal=p.e_crit, t_warn_min=p.t_warn)
 
         # ── 案1: 疲労蓄積モデル ───────────────────────────────
@@ -1128,7 +1145,6 @@ def api_simulate(request: Request, req: SimulateRequest):
             # 個人データなし → hr_max ベースの標準閾値（正直なフォールバック）
             hr_zone_est._set_fallback(p.hr_max)
 
-        logger.info("SIM step5: running pk_model")
         # ── PKモデル実行（疲労+ゾーン補正あり） ──────────────
         result = run_pk_model(
             engine_a_output   = engine_a,
