@@ -120,7 +120,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
                 "font-src 'self' https://fonts.gstatic.com; "
                 "img-src 'self' data: https: blob:; "
-                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de https://tile.openstreetmap.org https://*.tile.openstreetmap.org; "
+                "connect-src 'self' https://*.openrouteservice.org https://*.openweathermap.org https://overpass-api.de https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; "
                 "manifest-src 'self'; "
                 "worker-src blob:; "
                 "frame-ancestors 'none'"

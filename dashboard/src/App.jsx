@@ -668,18 +668,19 @@ function RouteMap({ coords, hoverFraction, onHover }) {
   const mapKey = coords[0]?.join(",");
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ height: 280 }}>
+    <div className="rounded-xl" style={{ height: 280, overflow: "hidden", position: "relative" }}>
       <MapContainer
         key={mapKey}
         center={coords[Math.floor(coords.length / 2)]}
         zoom={12}
-        style={{ height: "100%", width: "100%" }}
+        style={{ height: "100%", width: "100%", zIndex: 0 }}
         zoomControl={true}
       >
         <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          maxZoom={19}
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          subdomains="abcd"
+          maxZoom={20}
         />
         <MapUpdater />
         <FitBounds coords={coords} />

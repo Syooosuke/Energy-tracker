@@ -77,8 +77,13 @@ body {
 .leaflet-container img {
   max-width: none;
   box-shadow: none;
+  filter: none !important;
 }
-.leaflet-container { background: var(--leaflet-bg) !important; }
+/* ブラウザの自動ダークモードフィルターでタイルが暗くなるのを防ぐ */
+.leaflet-container {
+  background: var(--leaflet-bg) !important;
+  color-scheme: light;
+}
 .leaflet-control-zoom a {
   background: var(--leaflet-zoom-bg) !important;
   border-color: var(--leaflet-zoom-border) !important;
