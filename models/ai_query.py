@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -132,7 +133,13 @@ class AIQueryEngine:
                         provider=name,
                     )
             except Exception as e:
-                _logger.warning("AI provider '%s' failed: %s", name, e)
+                # 環境変数のAPIキーをログから除去
+                safe = str(e)
+                for k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"):
+                    v = os.environ.get(k, "")
+                    if v:
+                        safe = safe.replace(v, "***")
+                _logger.warning("AI provider '%s' failed: %s", name, safe)
                 continue  # 次のプロバイダーを試みる
 
         _logger.warning("全プロバイダー失敗、統計フォールバックを使用")
@@ -203,7 +210,7 @@ def _call_anthropic(prompt: str) -> str:
 
 
 def _call_gemini(prompt: str) -> str:
-    """Google Gemini API (gemini-1.5-flash-8b) — 無料枠: 1,500 req/日"""
+    """Google Gemini API — 無料枠: 1,500 req/日（429 時は最大2回リトライ）"""
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set")
@@ -218,10 +225,26 @@ def _call_gemini(prompt: str) -> str:
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.3},
     }
-    resp = _requests.post(url, json=payload, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    last_err = None
+    for attempt in range(3):  # 最大3回試行
+        try:
+            resp = _requests.post(url, json=payload, timeout=30)
+            if resp.status_code == 429:
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                _logger.warning("Gemini 429 rate limit, retrying in %ss (attempt %d/3)", wait, attempt + 1)
+                time.sleep(wait)
+                last_err = Exception(f"429 rate limit after {attempt+1} attempts")
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            # APIキーをログから除去してセキュアに記録
+            safe_msg = str(e).replace(api_key, "***")
+            last_err = Exception(safe_msg)
+            if "429" not in str(e):
+                raise last_err
+    raise last_err or Exception("Gemini failed after retries")
 
 
 def _call_groq(prompt: str) -> str:
