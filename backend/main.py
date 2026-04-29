@@ -1080,8 +1080,11 @@ def api_simulate(request: Request, req: SimulateRequest):
     )
 
     try:
+        logger.info("SIM step1: loading df")
         df       = _load_df()
+        logger.info("SIM step2: building engine_a (df rows=%d)", len(df))
         engine_a = _build_engine_a(df, slope_arr, prof)
+        logger.info("SIM step3: building supply_events")
 
         supply_events = []
         for s in req.supplies:
@@ -1093,6 +1096,7 @@ def api_simulate(request: Request, req: SimulateRequest):
             ))
         supply_events = sorted(supply_events, key=lambda e: e.time_min)
 
+        logger.info("SIM step4: building alert_config")
         alert_config = AlertConfig(e_crit_kcal=p.e_crit, t_warn_min=p.t_warn)
 
         # ── 案1: 疲労蓄積モデル ───────────────────────────────
@@ -1124,6 +1128,7 @@ def api_simulate(request: Request, req: SimulateRequest):
             # 個人データなし → hr_max ベースの標準閾値（正直なフォールバック）
             hr_zone_est._set_fallback(p.hr_max)
 
+        logger.info("SIM step5: running pk_model")
         # ── PKモデル実行（疲労+ゾーン補正あり） ──────────────
         result = run_pk_model(
             engine_a_output   = engine_a,
