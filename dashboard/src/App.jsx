@@ -677,7 +677,7 @@ function RouteMap({ coords, hoverFraction, onHover }) {
         zoomControl={true}
       >
         <TileLayer
-          url="/api/tiles/{z}/{x}/{y}.png"
+          url="/api/tiles/{z}/{x}/{y}"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           maxZoom={19}
         />

@@ -7,6 +7,7 @@ import os, sys, io, json, logging, datetime as _dt, time
 from typing import Annotated, List, Literal, Optional
 from collections import defaultdict
 import numpy as np
+import httpx
 from dotenv import load_dotenv
 
 # ── ロギング設定 ───────────────────────────────────────
@@ -263,7 +264,7 @@ def _get_tile_http_client() -> httpx.AsyncClient:
         )
     return _tile_http_client
 
-@app.get("/api/tiles/{z}/{x}/{y}.png", include_in_schema=False)
+@app.get("/api/tiles/{z}/{x}/{y}", include_in_schema=False)
 async def proxy_map_tile(z: int, x: int, y: int):
     """OSM タイルをプロキシ配信。同一オリジンにすることでCSP/CORS問題を回避。"""
     import time
