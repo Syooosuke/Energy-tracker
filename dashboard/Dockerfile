@@ -10,7 +10,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # 依存パッケージを先にインストール（package*.json が変わらない限りキャッシュ再利用）
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --silent
 
 # ソースをコピーしてビルド

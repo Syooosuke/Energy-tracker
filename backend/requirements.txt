@@ -41,7 +41,7 @@ slowapi>=0.1.9
 
 # 認証・アカウント管理
 sqlalchemy>=2.0.0
-python-jose[cryptography]>=3.3.0
+PyJWT>=2.10.0
 bcrypt>=4.0.0
 email-validator>=2.0.0
 

@@ -10,7 +10,8 @@ auth.py — JWT 認証ユーティリティ
 import os
 import bcrypt
 from datetime import datetime, timedelta, timezone
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError as JWTError
 from fastapi import Cookie, Depends, HTTPException, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session

@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # cooldown: 公開から 7 日経っていない版は提案しない（乗っ取られた版の取り込み対策）
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pip
+    directories:
+      - /
+      - /backend
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directories:
+      - /dashboard
+      - /backend
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
